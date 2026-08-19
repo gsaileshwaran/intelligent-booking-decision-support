@@ -1,0 +1,33 @@
+graph TD
+    %% Client Layer
+    subgraph ClientLayer ["Presentation Layer (React.js SPA - Port 3000)"]
+        CP["Customer Portal<br/>(Search, Preferences, Seat Map, Booking)"]
+        SP["Service Provider Portal<br/>(Venues, Shows, Occupancy, Analytics)"]
+    end
+
+    %% Backend Layer
+    subgraph BackendLayer ["Transactional Backend (Spring Boot REST API - Port 8080)"]
+        SEC["Spring Security + JWT Auth Filter"]
+        CTRL["REST Controllers<br/>(Auth, Catalogue, Booking, Provider, Analytics)"]
+        SVC["Transactional Services<br/>(BookingEngine, SeatInventoryManager)"]
+        PROXY["AI Service Proxy & Fallback Engine"]
+    end
+
+    %% Persistence Layer
+    subgraph PersistenceLayer ["Persistence Layer (Port 3306)"]
+        DB[(MySQL Database<br/>System of Record & Inventory Truth)]
+    end
+
+    %% AI Service Layer (Deferred)
+    subgraph AILayer ["Decision Support Boundary (Port 8000 - Deferred)"]
+        AI["Python FastAPI Service<br/>(Rule-Based MCDM Decision Engine)"]
+    end
+
+    %% Flow Connections
+    CP -->|REST / JSON HTTPS| SEC
+    SP -->|REST / JSON HTTPS| SEC
+    SEC --> CTRL
+    CTRL --> SVC
+    SVC -->|Spring Data JPA / JDBC| DB
+    SVC --> PROXY
+    PROXY -.->|REST / JSON (HTTPS)| AI

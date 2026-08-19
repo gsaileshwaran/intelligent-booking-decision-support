@@ -1,0 +1,26 @@
+flowchart TB
+    subgraph ClientDevice ["User Workspace / Browser Device"]
+        Browser ["Web Browser"]
+        ReactApp ["React 18 SPA (Port 3000)"]
+        Browser --- ReactApp
+    end
+
+    subgraph ApplicationServer ["Application Server Host"]
+        subgraph JVM ["Java 21 Runtime"]
+            SpringBoot ["Spring Boot Application (Port 8080)"]
+            Tomcat ["Embedded Tomcat Server"]
+            SpringSec ["Spring Security & JWT Filter"]
+            Hikari ["HikariCP Connection Pool"]
+
+            Tomcat --- SpringSec
+            SpringSec --- SpringBoot
+            SpringBoot --- Hikari
+        end
+    end
+
+    subgraph DatabaseServer ["Database Server Host"]
+        MySQL [["MySQL 8.0 Database (Port 3306)"]]
+    end
+
+    ReactApp -- "HTTPS / REST APIs" --> Tomcat
+    Hikari -- "JDBC Protocol" --> MySQL

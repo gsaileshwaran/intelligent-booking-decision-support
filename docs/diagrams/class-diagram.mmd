@@ -1,0 +1,107 @@
+classDiagram
+    class User {
+        +Long userId
+        +String name
+        +String email
+        +String passwordHash
+        +UserStatus status
+        +Role role
+    }
+
+    class Role {
+        +Long roleId
+        +RoleName roleName
+    }
+
+    class Theatre {
+        +Long theatreId
+        +User ownerUser
+        +String name
+        +String location
+        +String address
+        +TheatreStatus status
+    }
+
+    class Screen {
+        +Long screenId
+        +Theatre theatre
+        +String name
+        +Integer capacity
+    }
+
+    class Seat {
+        +Long seatId
+        +Screen screen
+        +String rowLabel
+        +Integer seatNumber
+        +SeatType seatType
+    }
+
+    class Movie {
+        +Long movieId
+        +String title
+        +String genre
+        +String language
+        +Integer duration
+        +MovieStatus status
+    }
+
+    class Show {
+        +Long showId
+        +Movie movie
+        +Screen screen
+        +LocalDate showDate
+        +LocalTime startTime
+        +LocalTime endTime
+        +BigDecimal ticketPrice
+        +ShowStatus status
+    }
+
+    class ShowSeat {
+        +Long showSeatId
+        +Show show
+        +Seat seat
+        +ShowSeatStatus status
+        +BigDecimal price
+        +LocalDateTime heldUntil
+        +Long version
+    }
+
+    class Booking {
+        +Long bookingId
+        +User user
+        +String bookingRef
+        +BigDecimal totalAmount
+        +BookingStatus status
+        +LocalDateTime createdAt
+    }
+
+    class BookingItem {
+        +Long bookingItemId
+        +Booking booking
+        +ShowSeat showSeat
+        +BigDecimal price
+    }
+
+    class Payment {
+        +Long paymentId
+        +Booking booking
+        +String transactionRef
+        +BigDecimal amount
+        +PaymentMethod paymentMethod
+        +PaymentStatus status
+        +LocalDateTime createdAt
+    }
+
+    Role "1" -- "*" User
+    User "1" -- "*" Theatre
+    Theatre "1" -- "*" Screen
+    Screen "1" -- "*" Seat
+    Screen "1" -- "*" Show
+    Movie "1" -- "*" Show
+    Show "1" -- "*" ShowSeat
+    Seat "1" -- "*" ShowSeat
+    User "1" -- "*" Booking
+    Booking "1" -- "*" BookingItem
+    ShowSeat "1" -- "1" BookingItem
+    Booking "1" -- "1" Payment

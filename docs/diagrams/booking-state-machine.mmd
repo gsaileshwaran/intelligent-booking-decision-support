@@ -1,0 +1,16 @@
+stateDiagram-v2
+    [*] --> HELD : Hold Seats Request (POST /api/bookings/hold)
+    
+    state "HELD (10-Minute Reservation Lock)" as HELD
+    state "CONFIRMED (Payment Successful)" as CONFIRMED
+    state "CANCELLED (User Release / Refund)" as CANCELLED
+    state "EXPIRED (Hold Timer Expired)" as EXPIRED
+
+    HELD --> CONFIRMED : Confirm & Pay (POST /api/bookings/{id}/confirm)
+    HELD --> EXPIRED : 10 Mins Expiry / Scheduled Cleaner
+    HELD --> CANCELLED : Manual User Cancel (POST /api/bookings/{id}/cancel)
+    CONFIRMED --> CANCELLED : Customer Refund Cancel
+
+    CONFIRMED --> [*]
+    CANCELLED --> [*]
+    EXPIRED --> [*]

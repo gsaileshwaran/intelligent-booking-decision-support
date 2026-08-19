@@ -1,0 +1,26 @@
+sequenceDiagram
+    autonumber
+    actor Provider as Service Provider Browser
+    participant React as React Operator Portal
+    participant Backend as Spring Boot REST API
+    participant DB as MySQL Database
+
+    Provider->>React: Login with ROLE_SERVICE_PROVIDER
+    React->>Backend: POST /api/auth/login
+    Backend-->>React: Return JWT Token with ROLE_SERVICE_PROVIDER claim
+
+    Provider->>React: Open Venue Manager & Submit New Theatre
+    React->>Backend: POST /api/provider/theatres (name, location, address)
+    Backend->>DB: Insert Theatre (owner_user_id = currentUserId)
+    Backend-->>React: Return Created Theatre
+
+    Provider->>React: Open Movie Manager & Add Movie Release
+    React->>Backend: POST /api/provider/movies (title, genre, language, duration)
+    Backend->>DB: Insert Movie entity
+    Backend-->>React: Return Created Movie
+
+    Provider->>React: Open Show Scheduler & Submit Showtime Session
+    React->>Backend: POST /api/provider/shows?movieId={id}&screenId={id}
+    Backend->>DB: Insert Show entity
+    Backend->>DB: Query Physical Seats for Screen & Auto-Populate ShowSeat Records
+    Backend-->>React: Return Created Show & Seat Inventory Status

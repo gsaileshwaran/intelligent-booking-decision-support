@@ -1,0 +1,119 @@
+erDiagram
+    ROLE ||--o{ USER : "assigned to"
+    USER ||--o{ THEATRE : "owns (Service Provider)"
+    USER ||--o{ BOOKING : "places"
+    USER ||--o{ USER_PREFERENCE : "defines"
+    
+    THEATRE ||--o{ SCREEN : "contains"
+    SCREEN ||--o{ SEAT : "has physical"
+    SCREEN ||--o{ SHOWS : "hosts"
+    
+    MOVIE ||--o{ SHOWS : "scheduled in"
+    SHOWS ||--o{ SHOW_SEAT : "generates inventory"
+    SEAT ||--o{ SHOW_SEAT : "instantiated per show"
+    
+    BOOKING ||--o{ BOOKING_ITEM : "contains items"
+    SHOW_SEAT ||--o{ BOOKING_ITEM : "referenced by"
+    BOOKING ||--|| PAYMENT : "has single"
+
+    USER {
+        bigint user_id PK
+        bigint role_id FK
+        string name
+        string email
+        string password_hash
+        string status
+    }
+
+    ROLE {
+        bigint role_id PK
+        string role_name
+    }
+
+    THEATRE {
+        bigint theatre_id PK
+        bigint owner_user_id FK
+        string name
+        string location
+        string address
+        string status
+    }
+
+    SCREEN {
+        bigint screen_id PK
+        bigint theatre_id FK
+        string name
+        int capacity
+    }
+
+    SEAT {
+        bigint seat_id PK
+        bigint screen_id FK
+        string row_label
+        int seat_number
+        string seat_type
+    }
+
+    MOVIE {
+        bigint movie_id PK
+        string title
+        string genre
+        string language
+        int duration
+        string censor_rating
+        string status
+    }
+
+    SHOWS {
+        bigint show_id PK
+        bigint movie_id FK
+        bigint screen_id FK
+        date show_date
+        time start_time
+        time end_time
+        decimal ticket_price
+        string status
+    }
+
+    SHOW_SEAT {
+        bigint show_seat_id PK
+        bigint show_id FK
+        bigint seat_id FK
+        string status
+        decimal price
+        datetime held_until
+        int version
+    }
+
+    BOOKING {
+        bigint booking_id PK
+        bigint user_id FK
+        string booking_ref
+        decimal total_amount
+        string status
+        datetime created_at
+    }
+
+    BOOKING_ITEM {
+        bigint booking_item_id PK
+        bigint booking_id FK
+        bigint show_seat_id FK
+        decimal price
+    }
+
+    PAYMENT {
+        bigint payment_id PK
+        bigint booking_id FK
+        string transaction_ref
+        decimal amount
+        string payment_method
+        string status
+        datetime created_at
+    }
+
+    USER_PREFERENCE {
+        bigint preference_id PK
+        bigint user_id FK
+        string preferred_genre
+        string preferred_language
+    }

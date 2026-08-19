@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor Customer as Customer (React Client)
+    participant Spring as Spring Boot REST API
+    participant DB as MySQL Database
+    participant AI as AI Service (FastAPI - Deferred)
+
+    Customer->>Spring: POST /api/recommendations/evaluate (Preferences, MovieId)
+    Spring->>DB: Query eligible candidate shows for Movie & Date
+    DB-->>Spring: Return candidate list (Prices, Times, Seat Availability)
+    
+    alt AI Service Available & Enabled
+        Spring->>AI: POST /api/v1/recommend (Candidates + Preferences)
+        AI->>AI: Apply Hard Constraints (Budget, Time, Seats)
+        AI->>AI: Compute MCDM Scores (S_i = Sum(w_j * x_ij))
+        AI-->>Spring: Return Ranked Shows + Score Factor Explanations
+    else AI Service Disabled / Unreachable / Timeout
+        Spring->>Spring: Execute Local Java Fallback Decision Engine
+    end
+    
+    Spring-->>Customer: Return Ranked Recommendations & Alternatives
+    Customer->>Spring: Select Show & Preferred Seats (POST /api/bookings/hold)
+    Spring->>DB: Lock Show Seats (AVAILABLE -> HELD)
+    Spring-->>Customer: Return Booking Hold Details & Timer (e.g. 10m)
