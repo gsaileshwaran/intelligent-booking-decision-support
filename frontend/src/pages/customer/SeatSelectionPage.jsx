@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { showService } from '../../services/showService';
 import { bookingService } from '../../services/bookingService';
 import { useBooking } from '../../context/BookingContext';
-import { Ticket, ArrowLeft, Clock, AlertCircle, CheckCircle } from 'lucide-react';
+import { Ticket, ArrowLeft, Clock, AlertCircle, CheckCircle, Shield } from 'lucide-react';
 
 export const SeatSelectionPage = () => {
   const { id } = useParams(); // showId
@@ -68,7 +68,6 @@ export const SeatSelectionPage = () => {
       }
     } catch (err) {
       setError(err.response?.data?.message || 'One or more selected seats were locked by another user. Please reselect available seats.');
-      // Refresh seat map
       fetchShowData();
     } finally {
       setHolding(false);
@@ -118,8 +117,8 @@ export const SeatSelectionPage = () => {
 
           <div className="flex items-center gap-4 text-xs">
             <div className="text-right">
-              <span className="block text-slate-500 text-[10px]">Base Price</span>
-              <span className="font-bold text-emerald-400 text-sm">${show.ticketPrice?.toFixed(2)}</span>
+              <span className="block text-slate-500 text-[10px]">Base Ticket Price</span>
+              <span className="font-bold text-emerald-400 text-sm">₹{show.ticketPrice?.toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -134,14 +133,27 @@ export const SeatSelectionPage = () => {
 
       {/* Seat Map Area */}
       <div className="glass-card p-8 mb-8 overflow-x-auto">
-        <div className="text-center text-xs text-slate-400 mb-8 font-semibold tracking-widest uppercase">
+        <div className="text-center text-xs text-slate-400 mb-6 font-semibold tracking-widest uppercase">
           Cinema Screen Direction
         </div>
 
         {/* Screen Visual */}
         <div className="cinema-screen" />
 
-        {/* Legend */}
+        {/* Category Multiplier Tier Indicator */}
+        <div className="flex flex-wrap justify-center gap-3 mb-6 text-[11px] font-semibold">
+          <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20">
+            Regular (1.0x Base)
+          </span>
+          <span className="px-3 py-1 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20">
+            Premium (1.25x Base)
+          </span>
+          <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            Balcony (1.50x Base)
+          </span>
+        </div>
+
+        {/* Status Legend */}
         <div className="flex flex-wrap justify-center gap-6 mb-10 text-xs">
           <div className="flex items-center gap-2">
             <div className="w-5 h-5 rounded bg-blue-500/20 border border-blue-500/40" />
@@ -172,19 +184,26 @@ export const SeatSelectionPage = () => {
                   const isAvailable = showSeat.status === 'AVAILABLE';
                   const isHeld = showSeat.status === 'HELD';
                   const isBooked = showSeat.status === 'BOOKED' || showSeat.status === 'CONFIRMED';
+                  const seatType = showSeat.seat?.seatType || 'REGULAR';
 
                   let statusClass = 'available';
                   if (isSelected) statusClass = 'selected';
                   else if (isHeld) statusClass = 'held';
                   else if (isBooked) statusClass = 'booked';
 
+                  let tierColorClass = '';
+                  if (isAvailable && !isSelected) {
+                    if (seatType === 'PREMIUM') tierColorClass = 'border-purple-500/50 text-purple-300 bg-purple-500/10';
+                    else if (seatType === 'BALCONY') tierColorClass = 'border-amber-500/50 text-amber-300 bg-amber-500/10';
+                  }
+
                   return (
                     <button
                       key={showSeat.showSeatId}
                       disabled={!isAvailable}
                       onClick={() => handleSeatClick(showSeat)}
-                      className={`seat-item ${statusClass}`}
-                      title={`Row ${showSeat.seat?.rowLabel} Seat ${showSeat.seat?.seatNumber} (${showSeat.seat?.seatType}) - $${showSeat.price}`}
+                      className={`seat-item ${statusClass} ${tierColorClass}`}
+                      title={`Row ${showSeat.seat?.rowLabel} Seat ${showSeat.seat?.seatNumber} (${seatType}) - ₹${showSeat.price}`}
                     >
                       {showSeat.seat?.seatNumber}
                     </button>
@@ -210,7 +229,7 @@ export const SeatSelectionPage = () => {
                   key={ss.showSeatId}
                   className="px-2.5 py-1 rounded-md bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold"
                 >
-                  {ss.seat?.rowLabel}{ss.seat?.seatNumber} (${ss.price})
+                  {ss.seat?.rowLabel}{ss.seat?.seatNumber} ({ss.seat?.seatType}) - ₹{ss.price}
                 </span>
               ))}
             </div>
@@ -220,7 +239,7 @@ export const SeatSelectionPage = () => {
         <div className="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-slate-800 pt-4 sm:pt-0">
           <div className="text-right">
             <span className="block text-[10px] text-slate-400 uppercase font-semibold">Total Price</span>
-            <span className="text-xl font-extrabold text-white">${totalPrice.toFixed(2)}</span>
+            <span className="text-xl font-extrabold text-white">₹{totalPrice.toFixed(2)}</span>
           </div>
 
           <button

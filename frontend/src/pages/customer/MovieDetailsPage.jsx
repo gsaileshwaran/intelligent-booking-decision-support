@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { movieService } from '../../services/movieService';
 import { showService } from '../../services/showService';
-import { Film, Clock, Calendar, MapPin, Ticket, ArrowLeft } from 'lucide-react';
+import { Film, Clock, MapPin, Ticket, ArrowLeft, Building2 } from 'lucide-react';
 
 export const MovieDetailsPage = () => {
   const { id } = useParams();
@@ -34,8 +34,21 @@ export const MovieDetailsPage = () => {
     }
   };
 
+  // Group shows by Theatre
+  const showsByTheatre = shows.reduce((acc, show) => {
+    const theatreName = show.screen?.theatre?.name || 'Grand Cinema Venue';
+    if (!acc[theatreName]) {
+      acc[theatreName] = {
+        theatre: show.screen?.theatre,
+        shows: [],
+      };
+    }
+    acc[theatreName].shows.push(show);
+    return acc;
+  }, {});
+
   if (loading) {
-    return <div className="py-20 text-center text-slate-400">Loading showtimes and venue data...</div>;
+    return <div className="py-20 text-center text-slate-400">Loading showtimes and multi-venue schedule...</div>;
   }
 
   if (error || !movie) {
@@ -60,12 +73,12 @@ export const MovieDetailsPage = () => {
 
       {/* Header Banner */}
       <div className="glass-card p-6 sm:p-8 mb-10 flex flex-col md:flex-row gap-8">
-        <div className="w-full md:w-56 aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 shrink-0">
+        <div className="w-full md:w-56 aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 shrink-0 shadow-xl border border-slate-700/50">
           {movie.posterUrl ? (
             <img src={movie.posterUrl} alt={movie.title} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-slate-600">
-              <Film className="w-16 h-16" />
+            <div className="w-full h-full flex items-center justify-center text-slate-600 bg-gradient-to-tr from-slate-900 to-indigo-950">
+              <Film className="w-16 h-16 text-indigo-400/40" />
             </div>
           )}
         </div>
@@ -95,55 +108,72 @@ export const MovieDetailsPage = () => {
         </div>
       </div>
 
-      {/* Available Showtimes Section */}
-      <h2 className="text-2xl font-bold mb-6">Available Showtimes</h2>
+      {/* Available Showtimes Section - Grouped by Theatre */}
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-white">Available Venues & Showtimes</h2>
+        <span className="text-xs text-slate-400 font-medium">Select a time slot to reserve seats</span>
+      </div>
 
       {shows.length === 0 ? (
         <div className="glass-card p-8 text-center text-slate-400">
           No showtimes scheduled for this movie currently.
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {shows.map((show) => (
-            <div key={show.showId} className="glass-card p-6 flex flex-col justify-between gap-4">
-              <div>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="text-lg font-bold text-white">
-                      {show.screen?.theatre?.name || 'Grand Cinema Venue'}
-                    </h3>
-                    <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-                      <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                      {show.screen?.theatre?.location || 'Downtown Location'}
-                    </p>
-                  </div>
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                    {show.screen?.name || 'Auditorium'}
-                  </span>
+        <div className="space-y-6">
+          {Object.entries(showsByTheatre).map(([theatreName, { theatre, shows: venueShows }]) => (
+            <div key={theatreName} className="glass-card p-6 border border-slate-800 hover:border-slate-700 transition-all">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 mb-4 gap-2">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-indigo-400" />
+                    {theatreName}
+                  </h3>
+                  <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                    <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                    {theatre?.address || theatre?.location || 'Chennai'}
+                  </p>
                 </div>
-
-                <div className="flex items-center gap-4 mt-4 pt-4 border-t border-slate-800 text-xs">
-                  <div>
-                    <span className="block text-slate-500 text-[10px]">Show Date</span>
-                    <span className="font-semibold text-slate-200">{show.showDate}</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500 text-[10px]">Start Time</span>
-                    <span className="font-semibold text-indigo-300">{show.startTime}</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500 text-[10px]">Base Price</span>
-                    <span className="font-semibold text-emerald-400">${show.ticketPrice?.toFixed(2)}</span>
-                  </div>
-                </div>
+                <span className="text-xs px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-semibold self-start sm:self-auto">
+                  {venueShows.length} Showtimes Available
+                </span>
               </div>
 
-              <button
-                onClick={() => navigate(`/shows/${show.showId}/seats`)}
-                className="btn-primary w-full text-xs justify-center py-2.5 mt-2"
-              >
-                <Ticket className="w-4 h-4" /> Select Seats & Reserve
-              </button>
+              {/* Group showtimes by Screen Name */}
+              <div className="space-y-4">
+                {Object.entries(
+                  venueShows.reduce((acc, show) => {
+                    const screenName = show.screen?.name || 'Standard Screen';
+                    if (!acc[screenName]) acc[screenName] = [];
+                    acc[screenName].push(show);
+                    return acc;
+                  }, {})
+                ).map(([screenName, screenShows]) => (
+                  <div key={screenName} className="flex flex-col md:flex-row items-start md:items-center gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
+                    <div className="w-48 shrink-0">
+                      <span className="text-xs font-bold text-purple-300 block">{screenName}</span>
+                      <span className="text-[10px] text-slate-500">Cap: {screenShows[0]?.screen?.capacity || 60} seats</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3 flex-1">
+                      {screenShows.map((show) => (
+                        <button
+                          key={show.showId}
+                          onClick={() => navigate(`/shows/${show.showId}/seats`)}
+                          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500/50 text-left transition-all group"
+                        >
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-300 group-hover:text-white">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>{show.startTime?.substring(0, 5)}</span>
+                          </div>
+                          <div className="text-[11px] text-emerald-400 font-semibold mt-0.5">
+                            ₹{show.ticketPrice?.toFixed(2)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>

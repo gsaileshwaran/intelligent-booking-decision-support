@@ -14,12 +14,13 @@ export const BookingConfirmationPage = () => {
   const [confirming, setConfirming] = useState(false);
   const [confirmedSuccess, setConfirmedSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [timeLeft, setTimeLeft] = useState(600); // 10 minutes hold timer in seconds
+  const [timeLeft, setTimeLeft] = useState(600);
 
   useEffect(() => {
     if (!booking) {
-      // Fetch booking from history/details if direct URL visit
       fetchBookingDetails();
+    } else if (booking.status === 'CONFIRMED') {
+      setConfirmedSuccess(true);
     }
   }, [id]);
 
@@ -38,13 +39,15 @@ export const BookingConfirmationPage = () => {
 
   const fetchBookingDetails = async () => {
     try {
-      const res = await bookingService.getMyHistory();
+      const res = await bookingService.getBookingById(id);
       if (res.success && res.data) {
-        const found = res.data.find((b) => b.bookingId === Number(id));
-        if (found) setBooking(found);
+        setBooking(res.data);
+        if (res.data.status === 'CONFIRMED') {
+          setConfirmedSuccess(true);
+        }
       }
     } catch (err) {
-      setError('Could not retrieve booking details.');
+      setError(err.response?.data?.message || 'Could not retrieve booking details.');
     }
   };
 
@@ -116,7 +119,7 @@ export const BookingConfirmationPage = () => {
               </div>
               <div>
                 <span className="block text-slate-500">Total Paid</span>
-                <span className="font-extrabold text-emerald-400 text-base">${booking.totalAmount?.toFixed(2)}</span>
+                <span className="font-extrabold text-emerald-400 text-base">₹{booking.totalAmount?.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -157,7 +160,7 @@ export const BookingConfirmationPage = () => {
               </div>
               <div className="text-right">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold">Total Amount</span>
-                <span className="block font-extrabold text-emerald-400 text-lg">${booking.totalAmount?.toFixed(2)}</span>
+                <span className="block font-extrabold text-emerald-400 text-lg">₹{booking.totalAmount?.toFixed(2)}</span>
               </div>
             </div>
 
@@ -233,7 +236,7 @@ export const BookingConfirmationPage = () => {
             onClick={handlePayment}
             className="btn-primary w-full py-3 text-sm font-bold justify-center"
           >
-            {confirming ? 'Processing Transaction...' : `Confirm & Pay $${booking.totalAmount?.toFixed(2)}`}
+            {confirming ? 'Processing Transaction...' : `Confirm & Pay ₹${booking.totalAmount?.toFixed(2)}`}
           </button>
         </div>
       )}

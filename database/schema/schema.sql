@@ -113,6 +113,7 @@ CREATE TABLE `show_seat` (
     `status` VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE', -- AVAILABLE, HELD, CONFIRMED/BOOKED
     `price` DECIMAL(10, 2) NOT NULL,
     `held_until` TIMESTAMP NULL,
+    `version` INT DEFAULT 0,
     CONSTRAINT `fk_show_seat_show` FOREIGN KEY (`show_id`) REFERENCES `shows` (`show_id`) ON DELETE CASCADE,
     CONSTRAINT `fk_show_seat_seat` FOREIGN KEY (`seat_id`) REFERENCES `seat` (`seat_id`),
     UNIQUE KEY `uk_show_seat_instance` (`show_id`, `seat_id`)

@@ -9,6 +9,7 @@ import { MovieDetailsPage } from '../pages/customer/MovieDetailsPage';
 import { SeatSelectionPage } from '../pages/customer/SeatSelectionPage';
 import { BookingConfirmationPage } from '../pages/customer/BookingConfirmationPage';
 import { BookingHistoryPage } from '../pages/customer/BookingHistoryPage';
+import { CustomerProfilePage } from '../pages/customer/CustomerProfilePage';
 import { LoginPage } from '../pages/customer/LoginPage';
 import { RegisterPage } from '../pages/customer/RegisterPage';
 
@@ -17,6 +18,11 @@ import { ProviderDashboardPage } from '../pages/provider/ProviderDashboardPage';
 import { VenueManagerPage } from '../pages/provider/VenueManagerPage';
 import { MovieManagerPage } from '../pages/provider/MovieManagerPage';
 import { ShowSchedulerPage } from '../pages/provider/ShowSchedulerPage';
+import { ProviderBookingsPage } from '../pages/provider/ProviderBookingsPage';
+import { ProviderShowsPage } from '../pages/provider/ProviderShowsPage';
+
+// Admin Pages
+import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage';
 
 export const AppRoutes = () => {
   return (
@@ -53,6 +59,32 @@ export const AppRoutes = () => {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/customer/profile"
+        element={
+          <ProtectedRoute>
+            <CustomerProfilePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <CustomerProfilePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Admin Protected Routes */}
+      <Route
+        path="/admin/dashboard"
+        element={
+          <RoleProtectedRoute allowedRoles={['ROLE_ADMIN']}>
+            <AdminDashboardPage />
+          </RoleProtectedRoute>
+        }
+      />
 
       {/* Provider / Admin Protected Routes */}
       <Route
@@ -84,6 +116,22 @@ export const AppRoutes = () => {
         element={
           <RoleProtectedRoute allowedRoles={['ROLE_SERVICE_PROVIDER', 'ROLE_ADMIN']}>
             <ShowSchedulerPage />
+          </RoleProtectedRoute>
+        }
+      />
+      <Route
+        path="/provider/shows"
+        element={
+          <RoleProtectedRoute allowedRoles={['ROLE_SERVICE_PROVIDER', 'ROLE_ADMIN']}>
+            <ProviderShowsPage />
+          </RoleProtectedRoute>
+        }
+      />
+      <Route
+        path="/provider/bookings"
+        element={
+          <RoleProtectedRoute allowedRoles={['ROLE_SERVICE_PROVIDER', 'ROLE_ADMIN']}>
+            <ProviderBookingsPage />
           </RoleProtectedRoute>
         }
       />

@@ -20,12 +20,27 @@ public class BookingController {
     @Autowired
     private BookingService bookingService;
 
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<BookingResponse>>> getBookings(
+            @AuthenticationPrincipal UserPrincipal currentUser) {
+        List<BookingResponse> history = bookingService.getUserBookingHistory(currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success("User bookings retrieved", history));
+    }
+
     @PostMapping("/hold")
     public ResponseEntity<ApiResponse<BookingResponse>> holdSeats(
             @Valid @RequestBody SeatHoldRequest request,
             @AuthenticationPrincipal UserPrincipal currentUser) {
         BookingResponse response = bookingService.holdSeats(request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success("Seats reserved successfully. Please complete payment before hold expires.", response));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<BookingResponse>> getBookingById(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserPrincipal currentUser) {
+        BookingResponse response = bookingService.getBookingById(id, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success("Booking details retrieved", response));
     }
 
     @PostMapping("/{id}/confirm")

@@ -6,6 +6,11 @@ export const bookingService = {
     return response.data;
   },
 
+  getBookingById: async (bookingId) => {
+    const response = await api.get(`/bookings/${bookingId}`);
+    return response.data;
+  },
+
   confirmBooking: async (bookingId, paymentMethod = 'MOCK_CARD') => {
     const response = await api.post(`/bookings/${bookingId}/confirm`, null, {
       params: { paymentMethod },

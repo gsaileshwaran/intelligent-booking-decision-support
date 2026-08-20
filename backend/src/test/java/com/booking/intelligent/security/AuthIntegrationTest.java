@@ -29,12 +29,18 @@ public class AuthIntegrationTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private com.booking.intelligent.config.DataInitializer dataInitializer;
+
     @BeforeEach
-    void setUp() {
-        roleRepository.findByRoleName(RoleName.ROLE_CUSTOMER)
+    void setUp() throws Exception {
+        Role customerRole = roleRepository.findByRoleName(RoleName.ROLE_CUSTOMER)
                 .orElseGet(() -> roleRepository.save(Role.builder().roleName(RoleName.ROLE_CUSTOMER).build()));
-        roleRepository.findByRoleName(RoleName.ROLE_SERVICE_PROVIDER)
+        Role providerRole = roleRepository.findByRoleName(RoleName.ROLE_SERVICE_PROVIDER)
                 .orElseGet(() -> roleRepository.save(Role.builder().roleName(RoleName.ROLE_SERVICE_PROVIDER).build()));
+        Role adminRole = roleRepository.findByRoleName(RoleName.ROLE_ADMIN)
+                .orElseGet(() -> roleRepository.save(Role.builder().roleName(RoleName.ROLE_ADMIN).build()));
+        dataInitializer.run();
     }
 
     @Test
@@ -63,10 +69,37 @@ public class AuthIntegrationTest {
     }
 
     @Test
+    void testDemoUsersLoginFlow() {
+        // Test Customer Login
+        AuthRequest customerRequest = new AuthRequest();
+        customerRequest.setEmail("customer@example.com");
+        customerRequest.setPassword("password123");
+        AuthResponse customerResponse = authService.authenticateUser(customerRequest);
+        assertNotNull(customerResponse.getToken());
+        assertEquals("ROLE_CUSTOMER", customerResponse.getRole());
+
+        // Test Provider Login
+        AuthRequest providerRequest = new AuthRequest();
+        providerRequest.setEmail("provider@example.com");
+        providerRequest.setPassword("password123");
+        AuthResponse providerResponse = authService.authenticateUser(providerRequest);
+        assertNotNull(providerResponse.getToken());
+        assertEquals("ROLE_SERVICE_PROVIDER", providerResponse.getRole());
+
+        // Test Admin Login
+        AuthRequest adminRequest = new AuthRequest();
+        adminRequest.setEmail("admin@example.com");
+        adminRequest.setPassword("password123");
+        AuthResponse adminResponse = authService.authenticateUser(adminRequest);
+        assertNotNull(adminResponse.getToken());
+        assertEquals("ROLE_ADMIN", adminResponse.getRole());
+    }
+
+    @Test
     void testInvalidPasswordThrowsException() {
         AuthRequest loginRequest = new AuthRequest();
-        loginRequest.setEmail("nonexistent@example.com");
-        loginRequest.setPassword("wrongPassword");
+        loginRequest.setEmail("customer@example.com");
+        loginRequest.setPassword("wrongPassword123");
 
         assertThrows(AuthenticationException.class, () -> {
             authService.authenticateUser(loginRequest);
