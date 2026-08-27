@@ -22,7 +22,7 @@ public class Recommendation {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "request_context", columnDefinition = "json")
+    @Column(name = "request_context", length = 2000)
     private String requestContext;
 
     @Column(name = "model_version", length = 50)

@@ -32,6 +32,6 @@ public class RecommendationItem {
     @Column(name = "suitability_score", precision = 5, scale = 4, nullable = false)
     private BigDecimal suitabilityScore;
 
-    @Column(name = "reason_data", columnDefinition = "json")
+    @Column(name = "reason_data", length = 2000)
     private String reasonData;
 }

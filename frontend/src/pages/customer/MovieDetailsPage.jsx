@@ -5,7 +5,7 @@ import { showService } from '../../services/showService';
 import { bookingService } from '../../services/bookingService';
 import { convenienceService } from '../../services/convenienceService';
 import { useAuth } from '../../context/AuthContext';
-import { useLocation } from '../../context/LocationContext';
+import { AIRecommendationModal } from '../../components/AIRecommendationModal';
 import {
   Film,
   Clock,
@@ -26,7 +26,8 @@ import {
   Sun,
   Moon,
   Sunset,
-  Sunrise
+  Sunrise,
+  Sparkles
 } from 'lucide-react';
 
 const FALLBACK_POSTER = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=600&auto=format&fit=crop&q=80";
@@ -46,6 +47,7 @@ export const MovieDetailsPage = () => {
 
   const [selectedDateIndex, setSelectedDateIndex] = useState(0); // 0 = Today, 1 = Tomorrow, 2 = Day After
   const [posterSrc, setPosterSrc] = useState(FALLBACK_POSTER);
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
 
   useEffect(() => {
     fetchMovieAndShows();
@@ -341,9 +343,17 @@ export const MovieDetailsPage = () => {
             {/* CTA Action Buttons */}
             <div className="flex flex-wrap gap-4 pt-4">
               {isBookable ? (
-                <a href="#showtimes-section" className="btn-primary py-3.5 px-8 text-xs font-extrabold shadow-lg shadow-indigo-600/30">
-                  <Ticket className="w-4 h-4" /> Select Showtime & Seats
-                </a>
+                <>
+                  <a href="#showtimes-section" className="btn-primary py-3.5 px-8 text-xs font-extrabold shadow-lg shadow-indigo-600/30">
+                    <Ticket className="w-4 h-4" /> Select Showtime & Seats
+                  </a>
+                  <button
+                    onClick={() => setIsAIModalOpen(true)}
+                    className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-extrabold flex items-center gap-2 shadow-lg shadow-purple-500/20 transition-all border border-purple-400/30"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300" /> AI Smart Recommendation
+                  </button>
+                </>
               ) : (
                 <div className="px-6 py-3.5 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-extrabold flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-indigo-400" /> COMING SOON TO PVK MULTIPLEXES
@@ -519,6 +529,13 @@ export const MovieDetailsPage = () => {
           </div>
         )}
       </div>
+
+      <AIRecommendationModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        movieId={movie?.movieId}
+        movieTitle={movie?.title}
+      />
     </div>
   );
 };

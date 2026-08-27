@@ -109,12 +109,16 @@ public class ShowService {
     }
 
     @Transactional
-    public Show createShow(Show show, Long movieId, Long screenId) {
-        Movie movie = movieRepository.findById(movieId)
-                .orElseThrow(() -> new ResourceNotFoundException("Movie", "id", movieId));
-
+    public Show createShow(Show show, Long movieId, Long screenId, Long ownerUserId) {
         Screen screen = screenRepository.findById(screenId)
                 .orElseThrow(() -> new ResourceNotFoundException("Screen", "id", screenId));
+
+        if (ownerUserId != null && (screen.getTheatre() == null || screen.getTheatre().getOwnerUser() == null || !screen.getTheatre().getOwnerUser().getUserId().equals(ownerUserId))) {
+            throw new AccessDeniedException("Access Denied: You do not own the theatre branch for this screen.");
+        }
+
+        Movie movie = movieRepository.findById(movieId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movie", "id", movieId));
 
         validateTicketPrice(show.getTicketPrice());
         validateShowtimeConflict(screenId, show.getShowDate(), show.getStartTime(), show.getEndTime(), null);
@@ -127,6 +131,11 @@ public class ShowService {
         generateShowSeatsForShow(savedShow);
 
         return savedShow;
+    }
+
+    @Transactional
+    public Show createShow(Show show, Long movieId, Long screenId) {
+        return createShow(show, movieId, screenId, null);
     }
 
     @Transactional

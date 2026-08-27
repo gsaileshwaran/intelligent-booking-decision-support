@@ -20,9 +20,6 @@ import java.util.List;
 public class DataInitializer implements CommandLineRunner {
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
-
-    @Autowired
     private RoleRepository roleRepository;
 
     @Autowired
@@ -54,51 +51,6 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        // 0a. Automatic Schema Migration
-        try {
-            jdbcTemplate.execute("ALTER TABLE `show_seat` ADD COLUMN `version` INT NOT NULL DEFAULT 0");
-        } catch (Exception ignored) {}
-
-        String[] schemaAdditions = new String[]{
-            "ALTER TABLE `movie` ADD COLUMN `description` VARCHAR(1500)",
-            "ALTER TABLE `movie` ADD COLUMN `original_title` VARCHAR(200)",
-            "ALTER TABLE `movie` ADD COLUMN `languages` VARCHAR(200)",
-            "ALTER TABLE `movie` ADD COLUMN `censor_rating` VARCHAR(20)",
-            "ALTER TABLE `movie` ADD COLUMN `release_year` INT",
-            "ALTER TABLE `movie` ADD COLUMN `release_date_status` VARCHAR(30)",
-            "ALTER TABLE `movie` ADD COLUMN `poster_url` VARCHAR(500)",
-            "ALTER TABLE `movie` ADD COLUMN `backdrop_url` VARCHAR(500)",
-            "ALTER TABLE `movie` ADD COLUMN `thumbnail_url` VARCHAR(500)",
-            "ALTER TABLE `movie` ADD COLUMN `trailer_url` VARCHAR(500)",
-            "ALTER TABLE `movie` ADD COLUMN `director` VARCHAR(200)",
-            "ALTER TABLE `movie` ADD COLUMN `movie_cast` VARCHAR(500)",
-            "ALTER TABLE `movie` ADD COLUMN `studio` VARCHAR(200)",
-            "ALTER TABLE `movie` ADD COLUMN `country` VARCHAR(100)",
-            "ALTER TABLE `movie` ADD COLUMN `rating` DOUBLE",
-            "ALTER TABLE `movie` ADD COLUMN `anticipation_score` INT",
-            "ALTER TABLE `movie` ADD COLUMN `anticipation_label` VARCHAR(30)",
-            "ALTER TABLE `movie` ADD COLUMN `is_upcoming` BOOLEAN",
-            "ALTER TABLE `movie` ADD COLUMN `is_now_showing` BOOLEAN",
-            "ALTER TABLE `theatre` ADD COLUMN `city` VARCHAR(100)",
-            "ALTER TABLE `theatre` ADD COLUMN `locality` VARCHAR(150)",
-            "ALTER TABLE `theatre` ADD COLUMN `latitude` DOUBLE",
-            "ALTER TABLE `theatre` ADD COLUMN `longitude` DOUBLE",
-            "ALTER TABLE `theatre` ADD COLUMN `description` VARCHAR(1000)",
-            "ALTER TABLE `theatre` ADD COLUMN `phone` VARCHAR(50)",
-            "ALTER TABLE `theatre` ADD COLUMN `operating_hours` VARCHAR(100)",
-            "ALTER TABLE `theatre` ADD COLUMN `amenities` VARCHAR(500)",
-            "ALTER TABLE `theatre` ADD COLUMN `formats` VARCHAR(200)",
-            "ALTER TABLE `theatre` ADD COLUMN `total_screens` INT",
-            "ALTER TABLE `theatre` ADD COLUMN `total_capacity` INT",
-            "ALTER TABLE `screen` ADD COLUMN `screen_type` VARCHAR(50)"
-        };
-
-        for (String sql : schemaAdditions) {
-            try {
-                jdbcTemplate.execute(sql);
-            } catch (Exception ignored) {}
-        }
-
         // 1. Seed Roles
         Role customerRole = roleRepository.findByRoleName(RoleName.ROLE_CUSTOMER)
                 .orElseGet(() -> roleRepository.save(Role.builder().roleName(RoleName.ROLE_CUSTOMER).build()));

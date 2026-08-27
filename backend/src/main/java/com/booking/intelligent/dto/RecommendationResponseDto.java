@@ -32,5 +32,6 @@ public class RecommendationResponseDto {
         private BigDecimal suitabilityScore;
         private List<String> explanationFactors;
         private boolean isBestMatch;
+        private String alternativeNotice;
     }
 }

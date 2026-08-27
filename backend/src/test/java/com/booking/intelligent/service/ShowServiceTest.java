@@ -189,4 +189,31 @@ public class ShowServiceTest {
         assertNotNull(reloaded);
         assertEquals(ShowStatus.CANCELLED, reloaded.getStatus());
     }
+
+    @Test
+    public void testCreateShowByUnauthorizedProviderThrowsAccessDeniedException() {
+        Show show = Show.builder()
+                .showDate(LocalDate.now().plusDays(6))
+                .startTime(LocalTime.of(10, 0))
+                .endTime(LocalTime.of(12, 30))
+                .ticketPrice(BigDecimal.valueOf(200.00))
+                .build();
+
+        // Provider B (otherProviderUser) attempts to schedule a show on Screen A (screen1 owned by providerUser)
+        AccessDeniedException exception = assertThrows(AccessDeniedException.class, () -> {
+            showService.createShow(show, testMovie.getMovieId(), screen1.getScreenId(), otherProviderUser.getUserId());
+        });
+
+        assertTrue(exception.getMessage().contains("Access Denied"));
+
+        // Verify unauthorized show was NOT persisted
+        List<Show> showsOnScreen = showRepository.findByScreenScreenIdAndShowDateAndStatusNot(
+                screen1.getScreenId(), LocalDate.now().plusDays(6), ShowStatus.CANCELLED);
+        assertTrue(showsOnScreen.isEmpty());
+
+        // Verify authorized Provider A (providerUser) succeeds on screen1
+        assertDoesNotThrow(() -> {
+            showService.createShow(show, testMovie.getMovieId(), screen1.getScreenId(), providerUser.getUserId());
+        });
+    }
 }

@@ -55,7 +55,18 @@ CREATE TABLE `theatre` (
     `owner_user_id` BIGINT NOT NULL,
     `name` VARCHAR(150) NOT NULL,
     `location` VARCHAR(150) NOT NULL,
+    `city` VARCHAR(100) NULL,
+    `locality` VARCHAR(150) NULL,
     `address` VARCHAR(255) NULL,
+    `latitude` DOUBLE NULL,
+    `longitude` DOUBLE NULL,
+    `description` VARCHAR(1000) NULL,
+    `phone` VARCHAR(50) NULL,
+    `operating_hours` VARCHAR(100) NULL,
+    `amenities` VARCHAR(500) NULL,
+    `formats` VARCHAR(200) NULL,
+    `total_screens` INT NULL,
+    `total_capacity` INT NULL,
     `status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     CONSTRAINT `fk_theatre_owner` FOREIGN KEY (`owner_user_id`) REFERENCES `user` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -65,6 +76,7 @@ CREATE TABLE `screen` (
     `screen_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `theatre_id` BIGINT NOT NULL,
     `name` VARCHAR(50) NOT NULL,
+    `screen_type` VARCHAR(50) NULL,
     `capacity` INT NOT NULL DEFAULT 0,
     CONSTRAINT `fk_screen_theatre` FOREIGN KEY (`theatre_id`) REFERENCES `theatre` (`theatre_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -84,10 +96,29 @@ CREATE TABLE `seat` (
 CREATE TABLE `movie` (
     `movie_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `title` VARCHAR(200) NOT NULL,
+    `original_title` VARCHAR(200) NULL,
+    `description` VARCHAR(1500) NULL,
     `genre` VARCHAR(100) NULL,
     `language` VARCHAR(50) NULL,
+    `languages` VARCHAR(200) NULL,
     `duration` INT NULL, -- duration in minutes
+    `censor_rating` VARCHAR(20) NULL,
     `release_date` DATE NULL,
+    `release_year` INT NULL,
+    `release_date_status` VARCHAR(30) NULL,
+    `poster_url` VARCHAR(500) NULL,
+    `backdrop_url` VARCHAR(500) NULL,
+    `thumbnail_url` VARCHAR(500) NULL,
+    `trailer_url` VARCHAR(500) NULL,
+    `director` VARCHAR(200) NULL,
+    `movie_cast` VARCHAR(500) NULL,
+    `studio` VARCHAR(200) NULL,
+    `country` VARCHAR(100) NULL,
+    `rating` DOUBLE NULL,
+    `anticipation_score` INT NULL,
+    `anticipation_label` VARCHAR(30) NULL,
+    `is_upcoming` BOOLEAN NULL,
+    `is_now_showing` BOOLEAN NULL,
     `status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -102,7 +133,9 @@ CREATE TABLE `shows` (
     `ticket_price` DECIMAL(10, 2) NOT NULL, -- base/default show price
     `status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     CONSTRAINT `fk_show_movie` FOREIGN KEY (`movie_id`) REFERENCES `movie` (`movie_id`),
-    CONSTRAINT `fk_show_screen` FOREIGN KEY (`screen_id`) REFERENCES `screen` (`screen_id`)
+    CONSTRAINT `fk_show_screen` FOREIGN KEY (`screen_id`) REFERENCES `screen` (`screen_id`),
+    CONSTRAINT `chk_show_times` CHECK (`start_time` < `end_time`),
+    KEY `idx_shows_conflict` (`screen_id`, `show_date`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 8. SHOW_SEAT (Show-Specific Inventory State & Holds)
@@ -116,7 +149,8 @@ CREATE TABLE `show_seat` (
     `version` INT DEFAULT 0,
     CONSTRAINT `fk_show_seat_show` FOREIGN KEY (`show_id`) REFERENCES `shows` (`show_id`) ON DELETE CASCADE,
     CONSTRAINT `fk_show_seat_seat` FOREIGN KEY (`seat_id`) REFERENCES `seat` (`seat_id`),
-    UNIQUE KEY `uk_show_seat_instance` (`show_id`, `seat_id`)
+    UNIQUE KEY `uk_show_seat_instance` (`show_id`, `seat_id`),
+    KEY `idx_show_seat_hold` (`status`, `held_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 9. BOOKING (Booking Lifecycle: PENDING, HELD, CONFIRMED, CANCELLED, EXPIRED)

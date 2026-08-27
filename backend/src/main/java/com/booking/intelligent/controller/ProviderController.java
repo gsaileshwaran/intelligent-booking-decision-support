@@ -145,8 +145,9 @@ public class ProviderController {
     public ResponseEntity<ApiResponse<Show>> createShow(
             @RequestBody Show show,
             @RequestParam Long movieId,
-            @RequestParam Long screenId) {
-        Show created = showService.createShow(show, movieId, screenId);
+            @RequestParam Long screenId,
+            @AuthenticationPrincipal UserPrincipal currentUser) {
+        Show created = showService.createShow(show, movieId, screenId, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success("Show session scheduled successfully", created));
     }
 }
