@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { bookingService } from '../../services/bookingService';
 import { useBooking } from '../../context/BookingContext';
-import { CheckCircle2, Clock, ShieldCheck, CreditCard, Ticket, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Clock, ShieldCheck, CreditCard, Ticket, AlertCircle, Tag, Check } from 'lucide-react';
 
 export const BookingConfirmationPage = () => {
   const { id } = useParams();
@@ -16,15 +16,33 @@ export const BookingConfirmationPage = () => {
   const [error, setError] = useState('');
   const [timeLeft, setTimeLeft] = useState(600);
 
+  // Promo Code State
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromoCode, setAppliedPromoCode] = useState('');
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [promoMessage, setPromoMessage] = useState('');
+
   useEffect(() => {
-    if (!booking) {
-      fetchBookingDetails();
-    } else if (booking.status === 'CONFIRMED') {
-      setConfirmedSuccess(true);
-    }
+    fetchBookingDetails();
   }, [id]);
 
   useEffect(() => {
+    if (!booking || booking.status !== 'HELD') return;
+
+    let initialSeconds = 600;
+    if (booking.holdExpiresAt) {
+      const expiry = new Date(booking.holdExpiresAt).getTime();
+      const now = new Date().getTime();
+      initialSeconds = Math.max(0, Math.floor((expiry - now) / 1000));
+    } else if (booking.createdAt) {
+      const created = new Date(booking.createdAt).getTime();
+      const expiry = created + 10 * 60 * 1000;
+      const now = new Date().getTime();
+      initialSeconds = Math.max(0, Math.floor((expiry - now) / 1000));
+    }
+
+    setTimeLeft(initialSeconds);
+
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -34,8 +52,9 @@ export const BookingConfirmationPage = () => {
         return prev - 1;
       });
     }, 1000);
+
     return () => clearInterval(timer);
-  }, []);
+  }, [booking?.bookingId, booking?.holdExpiresAt]);
 
   const fetchBookingDetails = async () => {
     try {
@@ -51,11 +70,29 @@ export const BookingConfirmationPage = () => {
     }
   };
 
+  const handleApplyPromo = async () => {
+    if (!promoCodeInput.trim() || !booking) return;
+    try {
+      const res = await bookingService.validatePromo(promoCodeInput, booking.totalAmount);
+      if (res.success && res.data && res.data.isValid) {
+        setDiscountAmount(res.data.discountAmount || 0);
+        setAppliedPromoCode(res.data.promoCode);
+        setPromoMessage(res.data.message);
+      } else {
+        setPromoMessage(res.data?.message || 'Invalid promo code.');
+        setDiscountAmount(0);
+        setAppliedPromoCode('');
+      }
+    } catch (err) {
+      setPromoMessage('Invalid promo code or network error.');
+    }
+  };
+
   const handlePayment = async () => {
     setConfirming(true);
     setError('');
     try {
-      const res = await bookingService.confirmBooking(id, paymentMethod);
+      const res = await bookingService.confirmBooking(id, paymentMethod, appliedPromoCode);
       if (res.success) {
         setBooking(res.data);
         setConfirmedSuccess(true);
@@ -79,6 +116,9 @@ export const BookingConfirmationPage = () => {
   if (!booking) {
     return <div className="py-20 text-center text-slate-400">Loading booking summary...</div>;
   }
+
+  const baseTotal = booking.totalAmount || 0;
+  const finalPayable = Math.max(0, baseTotal - discountAmount);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12">
@@ -125,8 +165,11 @@ export const BookingConfirmationPage = () => {
           </div>
 
           <div className="flex justify-center gap-4">
-            <button onClick={() => navigate('/my-bookings')} className="btn-primary text-xs">
-              <Ticket className="w-4 h-4" /> View My Bookings History
+            <button onClick={() => navigate(`/tickets/${booking.bookingId}`)} className="btn-primary text-xs font-bold">
+              <Ticket className="w-4 h-4" /> Open Digital E-Ticket
+            </button>
+            <button onClick={() => navigate('/my-bookings')} className="btn-secondary text-xs">
+              My Bookings
             </button>
           </div>
         </div>
@@ -138,9 +181,13 @@ export const BookingConfirmationPage = () => {
               <span className="badge badge-held mb-1">Temporary Hold</span>
               <h1 className="text-2xl font-bold text-white">Review & Complete Payment</h1>
             </div>
-            <div className="flex items-center gap-2 text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20 text-xs font-bold">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold ${
+              timeLeft === 0
+                ? 'text-red-400 bg-red-500/10 border-red-500/30'
+                : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+            }`}>
               <Clock className="w-4 h-4" />
-              <span>Hold Expires: {formatTimer(timeLeft)}</span>
+              <span>{timeLeft === 0 ? 'Hold Expired' : `Hold Expires: ${formatTimer(timeLeft)}`}</span>
             </div>
           </div>
 
@@ -151,16 +198,23 @@ export const BookingConfirmationPage = () => {
             </div>
           )}
 
+          {timeLeft === 0 && (
+            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-3 text-red-400 text-sm">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>Seat hold reservation has expired. Please reselect available seats.</span>
+            </div>
+          )}
+
           {/* Booking Summary Box */}
-          <div className="bg-slate-900/60 rounded-xl p-6 mb-8 border border-slate-800">
+          <div className="bg-slate-900/60 rounded-xl p-6 mb-6 border border-slate-800">
             <div className="flex justify-between items-center mb-4">
               <div>
                 <span className="text-[10px] text-slate-500 uppercase font-semibold">Booking Ref</span>
                 <span className="block font-mono font-bold text-indigo-300 text-sm">{booking.bookingRef}</span>
               </div>
               <div className="text-right">
-                <span className="text-[10px] text-slate-500 uppercase font-semibold">Total Amount</span>
-                <span className="block font-extrabold text-emerald-400 text-lg">₹{booking.totalAmount?.toFixed(2)}</span>
+                <span className="text-[10px] text-slate-500 uppercase font-semibold">Total Payable</span>
+                <span className="block font-extrabold text-emerald-400 text-lg">₹{finalPayable.toFixed(2)}</span>
               </div>
             </div>
 
@@ -178,17 +232,55 @@ export const BookingConfirmationPage = () => {
                 <div className="flex gap-1">
                   {booking.seats?.map((s) => (
                     <span key={s.showSeatId} className="px-1.5 py-0.5 bg-slate-800 text-indigo-300 font-bold rounded">
-                      {s.rowLabel}{s.seatNumber}
+                      {s.rowLabel}{s.seatNumber} ({s.seatType})
                     </span>
                   ))}
                 </div>
               </div>
             </div>
+
+            {/* Subtotal & Promo Discount Row */}
+            {discountAmount > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-800 text-xs flex justify-between items-center text-amber-300 bg-amber-500/10 p-2.5 rounded-lg">
+                <span className="font-bold flex items-center gap-1">
+                  <Tag className="w-3.5 h-3.5" /> Applied Code: {appliedPromoCode}
+                </span>
+                <span className="font-bold font-mono">-₹{discountAmount.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Promo Code Input Box */}
+          <div className="mb-8 p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+            <label className="form-label text-xs mb-2 block flex items-center gap-1.5">
+              <Tag className="w-3.5 h-3.5 text-amber-400" /> Apply Promotional Voucher Code
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter promo code (e.g. PVKWEEKEND, FIRSTBOOK)"
+                className="form-input text-xs uppercase"
+                value={promoCodeInput}
+                onChange={(e) => setPromoCodeInput(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleApplyPromo}
+                className="btn-secondary text-xs px-4 font-bold shrink-0"
+              >
+                Apply Promo
+              </button>
+            </div>
+            {promoMessage && (
+              <p className={`text-[11px] mt-2 font-semibold ${discountAmount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {promoMessage}
+              </p>
+            )}
           </div>
 
           {/* Payment Method Selection */}
           <div className="mb-8">
-            <label className="form-label mb-3 block">Select Payment Integration</label>
+            <label className="form-label mb-3 block text-xs">Select Payment Method</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <button
                 type="button"
@@ -231,13 +323,24 @@ export const BookingConfirmationPage = () => {
             </div>
           </div>
 
-          <button
-            disabled={confirming || timeLeft === 0}
-            onClick={handlePayment}
-            className="btn-primary w-full py-3 text-sm font-bold justify-center"
-          >
-            {confirming ? 'Processing Transaction...' : `Confirm & Pay ₹${booking.totalAmount?.toFixed(2)}`}
-          </button>
+          <div className="flex gap-4">
+            {timeLeft === 0 ? (
+              <button
+                onClick={() => navigate('/movies')}
+                className="btn-secondary w-full py-3 text-xs font-bold justify-center"
+              >
+                Back to Movies
+              </button>
+            ) : (
+              <button
+                disabled={confirming || timeLeft === 0}
+                onClick={handlePayment}
+                className="btn-primary w-full py-3 text-sm font-bold justify-center"
+              >
+                {confirming ? 'Processing Transaction...' : `Confirm & Pay ₹${finalPayable.toFixed(2)}`}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

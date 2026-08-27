@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { bookingService } from '../../services/bookingService';
 import { Ticket, Calendar, MapPin, Search, Filter, Eye, XCircle, AlertTriangle, CreditCard, ShieldCheck, X } from 'lucide-react';
 
 export const BookingHistoryPage = () => {
+  const navigate = useNavigate();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -55,6 +57,17 @@ export const BookingHistoryPage = () => {
     } finally {
       setCancellingSubmitting(false);
     }
+  };
+
+  const isHeldActive = (b) => {
+    if (b.status !== 'HELD' && b.status !== 'PENDING') return false;
+    if (b.holdExpiresAt) {
+      return new Date(b.holdExpiresAt).getTime() > new Date().getTime();
+    }
+    if (b.createdAt) {
+      return (new Date(b.createdAt).getTime() + 600000) > new Date().getTime();
+    }
+    return true;
   };
 
   const formatSeats = (seats) => {
@@ -202,6 +215,24 @@ export const BookingHistoryPage = () => {
                     <Eye className="w-3.5 h-3.5" /> Details
                   </button>
 
+                  {b.status === 'CONFIRMED' && (
+                    <button
+                      onClick={() => navigate(`/tickets/${b.bookingId}`)}
+                      className="btn-primary bg-indigo-600 hover:bg-indigo-500 text-xs px-3 py-1.5 flex items-center gap-1"
+                    >
+                      <Ticket className="w-3.5 h-3.5" /> Digital Ticket
+                    </button>
+                  )}
+
+                  {(b.status === 'HELD' || b.status === 'PENDING') && isHeldActive(b) && (
+                    <button
+                      onClick={() => navigate(`/bookings/${b.bookingId}/confirm`)}
+                      className="btn-primary text-xs px-3.5 py-1.5 font-bold shadow-lg shadow-indigo-500/20"
+                    >
+                      <CreditCard className="w-3.5 h-3.5" /> Resume & Pay
+                    </button>
+                  )}
+
                   {b.status === 'CONFIRMED' && b.showDate >= today && (
                     <button
                       onClick={() => {
@@ -260,7 +291,7 @@ export const BookingHistoryPage = () => {
                   ))}
                 </div>
                 <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-800 text-sm font-bold">
-                  <span className="text-white">Total Paid</span>
+                  <span className="text-white">Total Amount</span>
                   <span className="text-emerald-400">₹{selectedBooking.totalAmount?.toFixed(2)}</span>
                 </div>
               </div>
@@ -303,6 +334,24 @@ export const BookingHistoryPage = () => {
                   </div>
                 )}
               </div>
+
+              {selectedBooking.status === 'CONFIRMED' && (
+                <button
+                  onClick={() => navigate(`/tickets/${selectedBooking.bookingId}`)}
+                  className="btn-primary w-full py-2.5 text-xs font-bold"
+                >
+                  <Ticket className="w-4 h-4" /> Open Digital E-Ticket
+                </button>
+              )}
+
+              {(selectedBooking.status === 'HELD' || selectedBooking.status === 'PENDING') && isHeldActive(selectedBooking) && (
+                <button
+                  onClick={() => navigate(`/bookings/${selectedBooking.bookingId}/confirm`)}
+                  className="btn-primary w-full py-2.5 text-xs font-bold"
+                >
+                  <CreditCard className="w-4 h-4" /> Resume & Complete Payment
+                </button>
+              )}
             </div>
           </div>
         </div>

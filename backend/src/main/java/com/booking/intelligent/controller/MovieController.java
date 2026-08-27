@@ -17,9 +17,20 @@ public class MovieController {
     private MovieService movieService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<Movie>>> getAllActiveMovies() {
-        List<Movie> movies = movieService.getAllActiveMovies();
+    public ResponseEntity<ApiResponse<List<Movie>>> getMovies(
+            @RequestParam(required = false) String language,
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String sort) {
+        List<Movie> movies = movieService.filterMovies(language, genre, status, search, sort);
         return ResponseEntity.ok(ApiResponse.success("Movies retrieved successfully", movies));
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<List<Movie>>> searchMovies(@RequestParam String query) {
+        List<Movie> movies = movieService.searchMovies(query);
+        return ResponseEntity.ok(ApiResponse.success("Search results retrieved", movies));
     }
 
     @GetMapping("/{id}")

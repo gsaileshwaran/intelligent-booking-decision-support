@@ -2,6 +2,7 @@ package com.booking.intelligent.service;
 
 import com.booking.intelligent.dto.ShowRequestDto;
 import com.booking.intelligent.dto.ShowResponseDto;
+import com.booking.intelligent.dto.ShowSeatResponseDto;
 import com.booking.intelligent.entity.*;
 import com.booking.intelligent.enums.BookingStatus;
 import com.booking.intelligent.enums.PaymentStatus;
@@ -17,7 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -96,7 +99,6 @@ public class ShowService {
                 continue;
             }
 
-            // Overlap condition: startTime < existing.endTime AND endTime > existing.startTime
             if (startTime.isBefore(existing.getEndTime()) && endTime.isAfter(existing.getStartTime())) {
                 throw new IllegalArgumentException(
                         "Showtime conflict: Screen already has an active show scheduled between " +
@@ -139,7 +141,6 @@ public class ShowService {
         LocalTime targetStart = request.getStartTime() != null ? request.getStartTime() : show.getStartTime();
         LocalTime targetEnd = request.getEndTime() != null ? request.getEndTime() : show.getEndTime();
 
-        // Check showtime conflict with other shows on the same screen (excluding this show)
         validateShowtimeConflict(show.getScreen().getScreenId(), targetDate, targetStart, targetEnd, showId);
 
         if (request.getTicketPrice() != null) {
@@ -183,7 +184,6 @@ public class ShowService {
             showSeatRepository.save(ss);
         }
 
-        // Cancel bookings and refund payments for this show
         List<Booking> showBookings = bookingRepository.findAll().stream()
                 .filter(b -> !b.getItems().isEmpty() && 
                              b.getItems().get(0).getShowSeat() != null && 
@@ -198,6 +198,7 @@ public class ShowService {
             } else if (b.getStatus() == BookingStatus.CONFIRMED) {
                 b.setStatus(BookingStatus.CANCELLED);
                 bookingRepository.save(b);
+
                 paymentRepository.findByBookingBookingId(b.getBookingId()).ifPresent(p -> {
                     if (p.getStatus() == PaymentStatus.SUCCESS) {
                         p.setStatus(PaymentStatus.REFUNDED);
@@ -225,11 +226,8 @@ public class ShowService {
         return shows.stream()
                 .filter(s -> {
                     if (!s.getScreen().getTheatre().getOwnerUser().getUserId().equals(ownerUserId)) return false;
-
                     if (branchId != null && !s.getScreen().getTheatre().getTheatreId().equals(branchId)) return false;
-
                     if (screenId != null && !s.getScreen().getScreenId().equals(screenId)) return false;
-
                     if (movieId != null && !s.getMovie().getMovieId().equals(movieId)) return false;
 
                     if (statusFilter != null && !statusFilter.equalsIgnoreCase("ALL") && !statusFilter.isEmpty()) {
@@ -258,11 +256,10 @@ public class ShowService {
                 .collect(Collectors.toList());
     }
 
-    @Transactional
     public List<ShowSeat> getShowSeats(Long showId) {
+        Show show = getShowById(showId);
         List<ShowSeat> seats = showSeatRepository.findByShowShowId(showId);
         if (seats.isEmpty()) {
-            Show show = getShowById(showId);
             List<Seat> physicalSeats = seatRepository.findByScreenScreenId(show.getScreen().getScreenId());
             if (physicalSeats.isEmpty()) {
                 String[] rows = {"A", "B", "C", "D"};
@@ -294,6 +291,59 @@ public class ShowService {
             }
         }
         return seats;
+    }
+
+    public List<ShowSeatResponseDto> getShowSeatsWithUserOwnership(Long showId, Long userId) {
+        List<ShowSeat> showSeats = getShowSeats(showId);
+
+        Booking activeHeldBooking = null;
+        if (userId != null) {
+            LocalDateTime now = LocalDateTime.now();
+            List<Booking> userBookings = bookingRepository.findByUserUserIdOrderByCreatedAtDesc(userId);
+            activeHeldBooking = userBookings.stream()
+                    .filter(b -> b.getStatus() == BookingStatus.HELD &&
+                                 !b.getItems().isEmpty() &&
+                                 b.getItems().get(0).getShowSeat() != null &&
+                                 b.getItems().get(0).getShowSeat().getShow() != null &&
+                                 b.getItems().get(0).getShowSeat().getShow().getShowId().equals(showId))
+                    .filter(b -> {
+                        ShowSeat ss = b.getItems().get(0).getShowSeat();
+                        if (ss.getHeldUntil() != null && ss.getHeldUntil().isBefore(now)) return false;
+                        if (b.getCreatedAt() != null && b.getCreatedAt().plusMinutes(10).isBefore(now)) return false;
+                        return true;
+                    })
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        final Long activeBookingId = activeHeldBooking != null ? activeHeldBooking.getBookingId() : null;
+        final List<Long> heldShowSeatIds = activeHeldBooking != null
+                ? activeHeldBooking.getItems().stream().map(i -> i.getShowSeat().getShowSeatId()).collect(Collectors.toList())
+                : List.of();
+
+        LocalDateTime now = LocalDateTime.now();
+
+        return showSeats.stream().map(ss -> {
+            boolean isHeldByCurrent = userId != null &&
+                                      ss.getStatus() == ShowSeatStatus.HELD &&
+                                      heldShowSeatIds.contains(ss.getShowSeatId()) &&
+                                      (ss.getHeldUntil() == null || ss.getHeldUntil().isAfter(now));
+
+            return ShowSeatResponseDto.builder()
+                    .showSeatId(ss.getShowSeatId())
+                    .price(ss.getPrice())
+                    .status(ss.getStatus())
+                    .heldUntil(ss.getHeldUntil())
+                    .heldByCurrentUser(isHeldByCurrent)
+                    .bookingId(isHeldByCurrent ? activeBookingId : null)
+                    .seat(ShowSeatResponseDto.SeatDto.builder()
+                            .seatId(ss.getSeat().getSeatId())
+                            .rowLabel(ss.getSeat().getRowLabel())
+                            .seatNumber(ss.getSeat().getSeatNumber())
+                            .seatType(ss.getSeat().getSeatType().name())
+                            .build())
+                    .build();
+        }).collect(Collectors.toList());
     }
 
     private void generateShowSeatsForShow(Show show) {

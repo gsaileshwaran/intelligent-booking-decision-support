@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { customerService } from '../../services/customerService';
+import { convenienceService } from '../../services/convenienceService';
 import { useAuth } from '../../context/AuthContext';
-import { User, Mail, Shield, Key, CheckCircle, AlertCircle, Ticket, Clock, Calendar } from 'lucide-react';
+import { User, Mail, Shield, Key, CheckCircle, AlertCircle, Ticket, Clock, Calendar, Sliders, DollarSign, Users } from 'lucide-react';
 
 export const CustomerProfilePage = () => {
   const { updateUser } = useAuth();
@@ -22,20 +23,39 @@ export const CustomerProfilePage = () => {
   const [passwordSuccess, setPasswordSuccess] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
+  // Booking Preferences State
+  const [budgetLimit, setBudgetLimit] = useState(500);
+  const [preferredTime, setPreferredTime] = useState('EVENING');
+  const [preferredSeatType, setPreferredSeatType] = useState('PREMIUM');
+  const [groupSize, setGroupSize] = useState(2);
+  const [updatingPref, setUpdatingPref] = useState(false);
+  const [prefSuccess, setPrefSuccess] = useState('');
+
   useEffect(() => {
-    fetchProfile();
+    fetchProfileAndPreferences();
   }, []);
 
-  const fetchProfile = async () => {
+  const fetchProfileAndPreferences = async () => {
     setLoading(true);
     try {
-      const res = await customerService.getProfile();
-      if (res.success && res.data) {
-        setProfile(res.data);
-        setName(res.data.name || '');
+      const [profRes, prefRes] = await Promise.all([
+        customerService.getProfile(),
+        convenienceService.getPreferences(),
+      ]);
+
+      if (profRes.success && profRes.data) {
+        setProfile(profRes.data);
+        setName(profRes.data.name || '');
+      }
+
+      if (prefRes.success && prefRes.data) {
+        setBudgetLimit(prefRes.data.budgetLimit || 500);
+        setPreferredTime(prefRes.data.preferredTime || 'EVENING');
+        setPreferredSeatType(prefRes.data.preferredSeatType || 'PREMIUM');
+        setGroupSize(prefRes.data.groupSize || 2);
       }
     } catch (err) {
-      console.error('Failed to load profile:', err);
+      console.error('Failed to load profile or preferences:', err);
     } finally {
       setLoading(false);
     }
@@ -65,6 +85,27 @@ export const CustomerProfilePage = () => {
       setProfileError(err.response?.data?.message || 'Error updating profile.');
     } finally {
       setUpdatingProfile(false);
+    }
+  };
+
+  const handlePreferencesSubmit = async (e) => {
+    e.preventDefault();
+    setPrefSuccess('');
+    setUpdatingPref(true);
+    try {
+      const res = await convenienceService.updatePreferences({
+        budgetLimit,
+        preferredTime,
+        preferredSeatType,
+        groupSize,
+      });
+      if (res.success) {
+        setPrefSuccess('Booking preferences saved! Future AI decision recommendations will utilize these rules.');
+      }
+    } catch (err) {
+      console.error('Failed to save preferences:', err);
+    } finally {
+      setUpdatingPref(false);
     }
   };
 
@@ -120,8 +161,8 @@ export const CustomerProfilePage = () => {
       {/* Page Header */}
       <div className="mb-8">
         <span className="badge badge-confirmed mb-1">Account & Settings</span>
-        <h1 className="text-3xl font-extrabold text-white">Customer Profile</h1>
-        <p className="text-xs text-slate-400 mt-1">Manage your account information and credentials</p>
+        <h1 className="text-3xl font-extrabold text-white">Customer Profile & Settings</h1>
+        <p className="text-xs text-slate-400 mt-1">Manage your account information, security credentials, and decision preferences</p>
       </div>
 
       {/* Overview Card */}
@@ -160,6 +201,89 @@ export const CustomerProfilePage = () => {
           </div>
         </div>
       )}
+
+      {/* Booking Preferences Card */}
+      <div className="glass-card p-6 mb-8 border border-slate-800">
+        <div className="flex items-center gap-2 border-b border-slate-800 pb-4 mb-6">
+          <Sliders className="w-5 h-5 text-cyan-400" />
+          <div>
+            <h3 className="text-lg font-bold text-white">Customer Booking Preferences</h3>
+            <p className="text-xs text-slate-400">Baseline constraints for future AI Decision Support recommendation engine</p>
+          </div>
+        </div>
+
+        {prefSuccess && (
+          <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 shrink-0" />
+            <span>{prefSuccess}</span>
+          </div>
+        )}
+
+        <form onSubmit={handlePreferencesSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="form-label text-xs">Max Budget Per Ticket (₹)</label>
+            <input
+              type="number"
+              className="form-input text-xs"
+              value={budgetLimit}
+              onChange={(e) => setBudgetLimit(Number(e.target.value))}
+              min="100"
+              max="2000"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="form-label text-xs">Preferred Showtime Slot</label>
+            <select
+              className="form-input text-xs bg-slate-900"
+              value={preferredTime}
+              onChange={(e) => setPreferredTime(e.target.value)}
+            >
+              <option value="MORNING">Morning (9 AM - 12 PM)</option>
+              <option value="AFTERNOON">Afternoon (12 PM - 4 PM)</option>
+              <option value="EVENING">Evening (4 PM - 8 PM)</option>
+              <option value="NIGHT">Night (8 PM - 11 PM)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label text-xs">Preferred Seating Tier</label>
+            <select
+              className="form-input text-xs bg-slate-900"
+              value={preferredSeatType}
+              onChange={(e) => setPreferredSeatType(e.target.value)}
+            >
+              <option value="REGULAR">Regular Tier (1.0x Base)</option>
+              <option value="PREMIUM">Premium Tier (1.25x Base)</option>
+              <option value="BALCONY">Balcony Tier (1.50x Base)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label text-xs">Typical Group Size</label>
+            <input
+              type="number"
+              className="form-input text-xs"
+              value={groupSize}
+              onChange={(e) => setGroupSize(Number(e.target.value))}
+              min="1"
+              max="10"
+              required
+            />
+          </div>
+
+          <div className="sm:col-span-2 pt-2">
+            <button
+              type="submit"
+              disabled={updatingPref}
+              className="btn-primary bg-gradient-to-r from-cyan-600 to-indigo-600 text-xs py-2.5 px-6 font-bold"
+            >
+              {updatingPref ? 'Saving Preferences...' : 'Save Decision Preferences'}
+            </button>
+          </div>
+        </form>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Edit Profile Form */}

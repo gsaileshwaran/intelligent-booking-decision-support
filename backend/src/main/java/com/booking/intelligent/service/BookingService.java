@@ -12,8 +12,6 @@ import com.booking.intelligent.exception.ResourceNotFoundException;
 import com.booking.intelligent.exception.SeatNotAvailableException;
 import com.booking.intelligent.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +32,9 @@ public class BookingService {
     private BookingRepository bookingRepository;
 
     @Autowired
+    private BookingItemRepository bookingItemRepository;
+
+    @Autowired
     private ShowSeatRepository showSeatRepository;
 
     @Autowired
@@ -45,9 +46,6 @@ public class BookingService {
     @Autowired
     private PaymentRepository paymentRepository;
 
-    @Value("${app.booking.hold-duration-ms:600000}")
-    private long holdDurationMs;
-
     @Transactional
     public BookingResponse holdSeats(SeatHoldRequest request, Long userId) {
         User user = userRepository.findById(userId)
@@ -57,82 +55,74 @@ public class BookingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Show", "id", request.getShowId()));
 
         if (show.getStatus() == ShowStatus.CANCELLED) {
-            throw new InvalidBookingStateException("Cannot book seats for a cancelled show.");
+            throw new InvalidBookingStateException("Cannot reserve seats for a cancelled show.");
         }
 
+        // Validate showtime has not passed
         LocalDate today = LocalDate.now();
         LocalTime nowTime = LocalTime.now();
-        if (show.getShowDate().isBefore(today) ||
-           (show.getShowDate().isEqual(today) && show.getEndTime() != null && show.getEndTime().isBefore(nowTime))) {
-            throw new InvalidBookingStateException("Cannot book seats for a show session that has already ended.");
+        if (show.getShowDate() != null) {
+            if (show.getShowDate().isBefore(today)) {
+                throw new InvalidBookingStateException("Cannot reserve seats for a past showtime that has already ended.");
+            }
+            if (show.getShowDate().isEqual(today) && show.getStartTime() != null && show.getStartTime().isBefore(nowTime)) {
+                throw new InvalidBookingStateException("Cannot reserve seats for a showtime that has already started or ended.");
+            }
         }
 
-        // Concurrency Lock: Lock requested seats for update to prevent race conditions / double bookings
-        List<ShowSeat> requestedSeats = showSeatRepository.findAllByIdForUpdate(request.getShowSeatIds());
-
-        if (requestedSeats.size() != request.getShowSeatIds().size()) {
-            throw new ResourceNotFoundException("One or more requested show seats do not exist.");
+        List<ShowSeat> selectedSeats = showSeatRepository.findAllById(request.getShowSeatIds());
+        if (selectedSeats.size() != request.getShowSeatIds().size()) {
+            throw new ResourceNotFoundException("ShowSeat", "ids", request.getShowSeatIds());
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime holdExpiryTime = now.plusSeconds(holdDurationMs / 1000);
-
+        // Lock seats with PESSIMISTIC_WRITE
+        List<ShowSeat> lockedSeats = showSeatRepository.findAllByIdForUpdate(request.getShowSeatIds());
+        LocalDateTime holdUntil = LocalDateTime.now().plusMinutes(10);
         BigDecimal totalAmount = BigDecimal.ZERO;
-        List<BookingItem> bookingItems = new ArrayList<>();
 
-        for (ShowSeat showSeat : requestedSeats) {
-            if (showSeat.getStatus() != ShowSeatStatus.AVAILABLE) {
-                if (showSeat.getStatus() == ShowSeatStatus.HELD && showSeat.getHeldUntil() != null && showSeat.getHeldUntil().isBefore(now)) {
-                    // Previous hold expired, can be reclaimed
+        List<ShowSeat> seatsToHold = new ArrayList<>();
+        for (ShowSeat ss : lockedSeats) {
+            if (ss.getStatus() != ShowSeatStatus.AVAILABLE) {
+                if (ss.getStatus() == ShowSeatStatus.HELD && ss.getHeldUntil() != null && ss.getHeldUntil().isBefore(LocalDateTime.now())) {
+                    ss.setStatus(ShowSeatStatus.AVAILABLE);
+                    ss.setHeldUntil(null);
                 } else {
-                    throw new SeatNotAvailableException("Seat " + showSeat.getSeat().getRowLabel() + showSeat.getSeat().getSeatNumber() + " is no longer available.");
+                    throw new SeatNotAvailableException("Seat " + ss.getSeat().getRowLabel() + ss.getSeat().getSeatNumber() + " is no longer available.");
                 }
             }
 
-            showSeat.setStatus(ShowSeatStatus.HELD);
-            showSeat.setHeldUntil(holdExpiryTime);
-            showSeatRepository.save(showSeat);
-
-            totalAmount = totalAmount.add(showSeat.getPrice());
+            ss.setStatus(ShowSeatStatus.HELD);
+            ss.setHeldUntil(holdUntil);
+            seatsToHold.add(showSeatRepository.save(ss));
+            totalAmount = totalAmount.add(ss.getPrice());
         }
 
+        // Create Booking record in HELD status
         Booking booking = Booking.builder()
-                .user(user)
                 .bookingRef("BK-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                .user(user)
                 .status(BookingStatus.HELD)
                 .totalAmount(totalAmount)
-                .createdAt(now)
+                .createdAt(LocalDateTime.now())
                 .build();
 
-        for (ShowSeat showSeat : requestedSeats) {
-            BookingItem item = BookingItem.builder()
-                    .booking(booking)
-                    .showSeat(showSeat)
-                    .price(showSeat.getPrice())
-                    .build();
-            bookingItems.add(item);
-        }
-
-        booking.setItems(bookingItems);
         Booking savedBooking = bookingRepository.save(booking);
 
-        return mapToBookingResponse(savedBooking, show, holdExpiryTime);
+        List<BookingItem> items = new ArrayList<>();
+        for (ShowSeat ss : seatsToHold) {
+            BookingItem item = BookingItem.builder()
+                    .booking(savedBooking)
+                    .showSeat(ss)
+                    .price(ss.getPrice())
+                    .build();
+            items.add(bookingItemRepository.save(item));
+        }
+
+        savedBooking.setItems(items);
+        return mapToBookingResponse(savedBooking, show, holdUntil);
     }
 
     public BookingResponse getBookingById(Long bookingId, Long userId) {
-        Booking booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new ResourceNotFoundException("Booking", "id", bookingId));
-
-        if (!booking.getUser().getUserId().equals(userId)) {
-            throw new AccessDeniedException("Unauthorized access to booking details.");
-        }
-
-        Show show = booking.getItems().isEmpty() ? null : booking.getItems().get(0).getShowSeat().getShow();
-        return mapToBookingResponse(booking, show, null);
-    }
-
-    @Transactional
-    public BookingResponse confirmBooking(Long bookingId, String paymentMethod, Long userId) {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new ResourceNotFoundException("Booking", "id", bookingId));
 
@@ -141,8 +131,31 @@ public class BookingService {
         }
 
         Show show = booking.getItems().isEmpty() ? null : booking.getItems().get(0).getShowSeat().getShow();
+        LocalDateTime holdUntil = booking.getItems().isEmpty() ? null : booking.getItems().get(0).getShowSeat().getHeldUntil();
 
-        // Idempotency: If booking is already CONFIRMED, return response directly
+        return mapToBookingResponse(booking, show, holdUntil);
+    }
+
+    @Transactional
+    public BookingResponse confirmBooking(Long bookingId, String paymentMethod, Long userId) {
+        return confirmBooking(bookingId, paymentMethod, null, userId);
+    }
+
+    @Transactional
+    public BookingResponse confirmBooking(Long bookingId, String paymentMethod, String promoCode, Long userId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking", "id", bookingId));
+
+        if (!booking.getUser().getUserId().equals(userId)) {
+            throw new AccessDeniedException("Unauthorized access to booking.");
+        }
+
+        Show show = booking.getItems().isEmpty() ? null : booking.getItems().get(0).getShowSeat().getShow();
+        if (show != null && show.getStatus() == ShowStatus.CANCELLED) {
+            throw new InvalidBookingStateException("Cannot confirm booking for a cancelled show.");
+        }
+
+        // If booking is already CONFIRMED, return response directly
         if (booking.getStatus() == BookingStatus.CONFIRMED) {
             return mapToBookingResponse(booking, show, null);
         }
@@ -154,13 +167,50 @@ public class BookingService {
         LocalDateTime now = LocalDateTime.now();
 
         // Check if hold has expired
-        for (BookingItem item : booking.getItems()) {
-            ShowSeat showSeat = item.getShowSeat();
-            if (showSeat.getHeldUntil() != null && showSeat.getHeldUntil().isBefore(now) && booking.getStatus() == BookingStatus.HELD) {
+        if (booking.getStatus() == BookingStatus.HELD) {
+            boolean expired = false;
+            for (BookingItem item : booking.getItems()) {
+                ShowSeat showSeat = item.getShowSeat();
+                if (showSeat.getHeldUntil() != null && showSeat.getHeldUntil().isBefore(now)) {
+                    expired = true;
+                    break;
+                }
+            }
+            if (!expired && booking.getCreatedAt() != null && booking.getCreatedAt().plusMinutes(10).isBefore(now)) {
+                expired = true;
+            }
+            if (expired) {
                 booking.setStatus(BookingStatus.EXPIRED);
                 bookingRepository.save(booking);
+                for (BookingItem item : booking.getItems()) {
+                    ShowSeat showSeat = item.getShowSeat();
+                    showSeat.setStatus(ShowSeatStatus.AVAILABLE);
+                    showSeat.setHeldUntil(null);
+                    showSeatRepository.save(showSeat);
+                }
                 throw new InvalidBookingStateException("Seat hold time has expired. Please reselect your seats.");
             }
+        }
+
+        // Apply Server-Side Promo Discount if provided
+        if (promoCode != null && !promoCode.trim().isEmpty()) {
+            BigDecimal currentTotal = booking.getTotalAmount() != null ? booking.getTotalAmount() : BigDecimal.ZERO;
+            BigDecimal discount = BigDecimal.ZERO;
+            String code = promoCode.trim().toUpperCase();
+
+            if ("PVKWEEKEND".equals(code)) {
+                discount = currentTotal.multiply(BigDecimal.valueOf(0.15));
+            } else if ("FIRSTBOOK".equals(code)) {
+                discount = BigDecimal.valueOf(50.00);
+            } else if ("IMAXSPECIAL".equals(code)) {
+                discount = BigDecimal.valueOf(30.00);
+            }
+
+            BigDecimal finalAmount = currentTotal.subtract(discount);
+            if (finalAmount.compareTo(BigDecimal.ZERO) < 0) {
+                finalAmount = BigDecimal.ZERO;
+            }
+            booking.setTotalAmount(finalAmount);
         }
 
         // Process Payment (Sandbox / Mock Integration)
@@ -226,108 +276,86 @@ public class BookingService {
             showSeatRepository.save(showSeat);
         }
 
-        // Refund payment if payment was made
-        paymentRepository.findByBookingBookingId(bookingId).ifPresent(payment -> {
-            if (payment.getStatus() == PaymentStatus.SUCCESS) {
-                payment.setStatus(PaymentStatus.REFUNDED);
-                paymentRepository.save(payment);
-            }
-        });
-
         booking.setStatus(BookingStatus.CANCELLED);
         Booking cancelledBooking = bookingRepository.save(booking);
 
-        return mapToBookingResponse(cancelledBooking, show, null);
+        // Process Simulated Refund
+        Payment payment = paymentRepository.findByBookingBookingId(bookingId).orElse(null);
+        String refundRef = null;
+        BigDecimal refundedAmount = booking.getTotalAmount();
+        if (payment != null) {
+            payment.setStatus(PaymentStatus.REFUNDED);
+            paymentRepository.save(payment);
+            refundRef = "REFUND-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        }
+
+        BookingResponse response = mapToBookingResponse(cancelledBooking, show, null);
+        response.setRefundRef(refundRef);
+        response.setRefundedAmount(refundedAmount);
+        return response;
+    }
+
+    @Transactional
+    public void cleanupExpiredHolds() {
+        LocalDateTime now = LocalDateTime.now();
+        List<ShowSeat> expired = showSeatRepository.findExpiredHolds(now);
+        for (ShowSeat ss : expired) {
+            ss.setStatus(ShowSeatStatus.AVAILABLE);
+            ss.setHeldUntil(null);
+            showSeatRepository.save(ss);
+        }
     }
 
     public List<BookingResponse> getUserBookingHistory(Long userId) {
         List<Booking> bookings = bookingRepository.findByUserUserIdOrderByCreatedAtDesc(userId);
-        return bookings.stream().map(booking -> {
-            Show show = booking.getItems().isEmpty() ? null : booking.getItems().get(0).getShowSeat().getShow();
-            return mapToBookingResponse(booking, show, null);
+        return bookings.stream().map(b -> {
+            Show show = b.getItems().isEmpty() ? null : b.getItems().get(0).getShowSeat().getShow();
+            LocalDateTime holdUntil = b.getItems().isEmpty() ? null : b.getItems().get(0).getShowSeat().getHeldUntil();
+            return mapToBookingResponse(b, show, holdUntil);
         }).collect(Collectors.toList());
     }
 
-    public List<BookingResponse> getProviderBookings(Long ownerUserId, Long branchId, String dateFilter, String statusFilter) {
-        List<Booking> bookings = (branchId != null) 
-                ? bookingRepository.findByTheatreId(branchId) 
-                : bookingRepository.findByProviderOwnerId(ownerUserId);
-
-        LocalDate today = LocalDate.now();
-
+    public List<BookingResponse> getProviderBookings(Long ownerUserId, String searchQuery, String statusFilter) {
+        List<Booking> bookings = bookingRepository.findByProviderOwnerId(ownerUserId);
         return bookings.stream()
                 .filter(b -> {
-                    if (b.getItems().isEmpty()) return false;
-                    Show show = b.getItems().get(0).getShowSeat().getShow();
-                    if (show == null || show.getScreen() == null || show.getScreen().getTheatre() == null) return false;
-                    if (!show.getScreen().getTheatre().getOwnerUser().getUserId().equals(ownerUserId)) return false;
-
-                    if (branchId != null && !show.getScreen().getTheatre().getTheatreId().equals(branchId)) return false;
-
                     if (statusFilter != null && !statusFilter.equalsIgnoreCase("ALL") && !statusFilter.isEmpty()) {
                         if (!b.getStatus().name().equalsIgnoreCase(statusFilter)) return false;
                     }
-
-                    if (dateFilter != null && !dateFilter.equalsIgnoreCase("ALL") && !dateFilter.isEmpty()) {
-                        LocalDate showDate = show.getShowDate();
-                        if (showDate != null) {
-                            if ("TODAY".equalsIgnoreCase(dateFilter) && !showDate.isEqual(today)) return false;
-                            if ("UPCOMING".equalsIgnoreCase(dateFilter) && !showDate.isAfter(today)) return false;
-                            if ("PAST".equalsIgnoreCase(dateFilter) && !showDate.isBefore(today)) return false;
-                        }
+                    if (searchQuery != null && !searchQuery.trim().isEmpty()) {
+                        String q = searchQuery.toLowerCase();
+                        boolean matchRef = b.getBookingRef() != null && b.getBookingRef().toLowerCase().contains(q);
+                        boolean matchCustomer = b.getUser().getName() != null && b.getUser().getName().toLowerCase().contains(q);
+                        boolean matchEmail = b.getUser().getEmail() != null && b.getUser().getEmail().toLowerCase().contains(q);
+                        if (!matchRef && !matchCustomer && !matchEmail) return false;
                     }
-
                     return true;
                 })
                 .map(b -> {
                     Show show = b.getItems().isEmpty() ? null : b.getItems().get(0).getShowSeat().getShow();
-                    return mapToBookingResponse(b, show, null);
+                    LocalDateTime holdUntil = b.getItems().isEmpty() ? null : b.getItems().get(0).getShowSeat().getHeldUntil();
+                    return mapToBookingResponse(b, show, holdUntil);
                 })
                 .collect(Collectors.toList());
     }
 
-    @Scheduled(fixedDelay = 60000)
-    @Transactional
-    public void cleanupExpiredHolds() {
-        LocalDateTime now = LocalDateTime.now();
-        List<ShowSeat> expiredSeats = showSeatRepository.findExpiredHolds(now);
-        for (ShowSeat seat : expiredSeats) {
-            seat.setStatus(ShowSeatStatus.AVAILABLE);
-            seat.setHeldUntil(null);
-            showSeatRepository.save(seat);
-        }
+    public BookingResponse mapToBookingResponse(Booking booking, Show show, LocalDateTime holdUntil) {
+        Payment payment = paymentRepository.findByBookingBookingId(booking.getBookingId()).orElse(null);
 
-        List<Booking> heldBookings = bookingRepository.findByStatus(BookingStatus.HELD);
-        for (Booking b : heldBookings) {
-            boolean allExpired = b.getItems().stream().allMatch(item -> 
-                item.getShowSeat().getHeldUntil() == null || item.getShowSeat().getHeldUntil().isBefore(now)
-            );
-            if (allExpired && b.getCreatedAt().plusMinutes(10).isBefore(now)) {
-                b.setStatus(BookingStatus.EXPIRED);
-                bookingRepository.save(b);
-            }
-        }
-    }
-
-    public BookingResponse mapToBookingResponse(Booking booking, Show show, LocalDateTime holdExpiresAt) {
-        List<BookingResponse.SeatDetailDto> seatDtos = booking.getItems().stream().map(item -> {
-            Seat seat = item.getShowSeat().getSeat();
+        List<BookingResponse.SeatDetailDto> seats = booking.getItems().stream().map(item -> {
+            ShowSeat ss = item.getShowSeat();
             return BookingResponse.SeatDetailDto.builder()
-                    .showSeatId(item.getShowSeat().getShowSeatId())
-                    .rowLabel(seat.getRowLabel())
-                    .seatNumber(seat.getSeatNumber())
-                    .seatType(seat.getSeatType().name())
+                    .showSeatId(ss.getShowSeatId())
+                    .rowLabel(ss.getSeat().getRowLabel())
+                    .seatNumber(ss.getSeat().getSeatNumber())
+                    .seatType(ss.getSeat().getSeatType().name())
                     .price(item.getPrice())
                     .build();
         }).collect(Collectors.toList());
 
-        Payment payment = paymentRepository.findByBookingBookingId(booking.getBookingId()).orElse(null);
-
-        String refundRef = null;
-        BigDecimal refundedAmount = null;
-        if (payment != null && payment.getStatus() == PaymentStatus.REFUNDED) {
-            refundRef = "REFUND-" + String.format("%08X", booking.getBookingId().hashCode() & 0xFFFFFFFFL);
-            refundedAmount = booking.getTotalAmount();
+        LocalDateTime effectiveHoldUntil = holdUntil;
+        if (effectiveHoldUntil == null && booking.getStatus() == BookingStatus.HELD && booking.getCreatedAt() != null) {
+            effectiveHoldUntil = booking.getCreatedAt().plusMinutes(10);
         }
 
         return BookingResponse.builder()
@@ -336,24 +364,22 @@ public class BookingService {
                 .userId(booking.getUser().getUserId())
                 .customerName(booking.getUser().getName())
                 .customerEmail(booking.getUser().getEmail())
+                .status(booking.getStatus())
+                .totalAmount(booking.getTotalAmount())
+                .createdAt(booking.getCreatedAt())
+                .holdExpiresAt(effectiveHoldUntil)
                 .showId(show != null ? show.getShowId() : null)
                 .movieTitle(show != null ? show.getMovie().getTitle() : null)
-                .theatreId(show != null ? show.getScreen().getTheatre().getTheatreId() : null)
                 .theatreName(show != null ? show.getScreen().getTheatre().getName() : null)
                 .screenName(show != null ? show.getScreen().getName() : null)
                 .showDate(show != null ? show.getShowDate() : null)
                 .startTime(show != null ? show.getStartTime() : null)
-                .endTime(show != null ? show.getEndTime() : null)
-                .totalAmount(booking.getTotalAmount())
-                .status(booking.getStatus())
-                .createdAt(booking.getCreatedAt())
-                .holdExpiresAt(holdExpiresAt)
-                .seats(seatDtos)
+                .paymentStatus(payment != null ? payment.getStatus().name() : (booking.getStatus() == BookingStatus.CONFIRMED ? "SUCCESS" : "PENDING"))
                 .paymentMethod(payment != null ? payment.getPaymentMethod() : null)
                 .transactionRef(payment != null ? payment.getTransactionRef() : null)
-                .paymentStatus(payment != null ? payment.getStatus().name() : null)
-                .refundRef(refundRef)
-                .refundedAmount(refundedAmount)
+                .seats(seats)
+                .refundRef(booking.getStatus() == BookingStatus.CANCELLED ? (payment != null ? "REFUND-" + booking.getBookingRef() : null) : null)
+                .refundedAmount(booking.getStatus() == BookingStatus.CANCELLED ? booking.getTotalAmount() : null)
                 .build();
     }
 }

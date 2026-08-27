@@ -27,6 +27,9 @@ public class Screen {
     @Column(name = "name", length = 50, nullable = false)
     private String name;
 
+    @Column(name = "screen_type", length = 50)
+    private String screenType;
+
     @Column(name = "capacity", nullable = false)
     private Integer capacity;
 }

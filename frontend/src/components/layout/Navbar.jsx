@@ -1,11 +1,35 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Film, LogOut, Ticket, LayoutDashboard, Building2, Calendar, User, Shield } from 'lucide-react';
+import { useLocation } from '../../context/LocationContext';
+import { convenienceService } from '../../services/convenienceService';
+import { Film, LogOut, Ticket, LayoutDashboard, Building2, Calendar, User, Shield, MapPin, Bookmark, Tag, Bell } from 'lucide-react';
 
 export const Navbar = () => {
   const { user, isAuthenticated, isProvider, isAdmin, logout } = useAuth();
+  const { selectedLocation, changeLocation, availableLocations } = useLocation();
   const navigate = useNavigate();
+
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchNotificationsCount();
+    }
+  }, [isAuthenticated]);
+
+  const fetchNotificationsCount = async () => {
+    try {
+      const res = await convenienceService.getNotifications();
+      if (res.success && res.data) {
+        const unread = res.data.filter((n) => !n.isRead).length;
+        setUnreadNotificationsCount(unread);
+      }
+    } catch (err) {
+      // Silent catch
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -13,39 +37,82 @@ export const Navbar = () => {
   };
 
   return (
-    <nav className="glass-nav sticky top-0 z-50 px-6 py-4">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
-        {/* Brand Logo */}
-        <Link to="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-            <Film className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <span className="text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-indigo-200 bg-clip-text text-transparent">
-              CineBooking
-            </span>
-            <span className="block text-[10px] uppercase tracking-wider text-indigo-400 font-semibold">
-              Transactional Platform
-            </span>
-          </div>
-        </Link>
+    <nav className="glass-nav sticky top-0 z-50 px-4 sm:px-6 py-3.5">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        {/* Left Section: Logo & Location Selector */}
+        <div className="flex items-center gap-6">
+          <Link to="/" className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+              <Film className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <span className="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-indigo-200 bg-clip-text text-transparent">
+                PVK Cinema
+              </span>
+              <span className="block text-[9px] uppercase tracking-widest text-cyan-400 font-bold">
+                Booking Platform
+              </span>
+            </div>
+          </Link>
 
-        {/* Navigation Links */}
-        <div className="flex items-center gap-4 sm:gap-5">
-          <Link to="/movies" className="text-xs font-medium text-slate-300 hover:text-white transition-colors">
+          {/* Location Selector Dropdown */}
+          <div className="relative hidden md:block">
+            <button
+              onClick={() => setShowLocationDropdown(!showLocationDropdown)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 transition-all"
+            >
+              <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{selectedLocation}</span>
+            </button>
+
+            {showLocationDropdown && (
+              <div className="absolute left-0 mt-2 w-40 glass-card p-2 border border-slate-800 shadow-2xl z-50 space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase px-2 py-1 block">Select City</span>
+                {availableLocations.map((loc) => (
+                  <button
+                    key={loc}
+                    onClick={() => {
+                      changeLocation(loc);
+                      setShowLocationDropdown(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                      selectedLocation === loc ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {loc}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Center/Right Navigation Links */}
+        <div className="flex items-center gap-3 sm:gap-5">
+          <Link to="/movies" className="text-xs font-semibold text-slate-300 hover:text-white transition-colors">
             Movies
           </Link>
-          
+
+          <Link to="/theatres" className="text-xs font-semibold text-slate-300 hover:text-white transition-colors flex items-center gap-1">
+            <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+            Theatres
+          </Link>
+
+          <Link to="/offers" className="text-xs font-semibold text-slate-300 hover:text-white transition-colors flex items-center gap-1">
+            <Tag className="w-3.5 h-3.5 text-amber-400" />
+            Offers
+          </Link>
+
           {isAuthenticated && (
             <>
-              <Link to="/my-bookings" className="text-xs font-medium text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors">
-                <Ticket className="w-4 h-4 text-indigo-400" />
-                My Bookings
+              <Link to="/watchlist" className="text-xs font-semibold text-slate-300 hover:text-white transition-colors flex items-center gap-1">
+                <Bookmark className="w-3.5 h-3.5 text-purple-400" />
+                Watchlist
               </Link>
 
-              <Link to="/customer/profile" className="text-xs font-medium text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors">
-                <User className="w-4 h-4 text-purple-400" />
-                Profile
+              <Link to="/my-bookings" className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors">
+                <Ticket className="w-4 h-4 text-indigo-400" />
+                My Bookings
               </Link>
             </>
           )}
@@ -67,27 +134,19 @@ export const Navbar = () => {
                 <Building2 className="w-3.5 h-3.5" />
                 Branches
               </Link>
-              <Link to="/provider/shows" className="text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1 transition-colors">
-                <Calendar className="w-3.5 h-3.5" />
-                Shows
-              </Link>
-              <Link to="/provider/bookings" className="text-xs font-semibold text-emerald-300 hover:text-white flex items-center gap-1 transition-colors">
-                <Ticket className="w-3.5 h-3.5" />
-                Bookings
-              </Link>
             </>
           )}
 
-          {/* User Section */}
+          {/* User Profile & Auth Section */}
           {isAuthenticated ? (
-            <div className="flex items-center gap-4 pl-4 border-l border-slate-700/60">
-              <Link to="/customer/profile" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-indigo-400">
+            <div className="flex items-center gap-3 pl-3 border-l border-slate-800">
+              <Link to="/customer/profile" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-extrabold text-cyan-300">
                   {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                 </div>
-                <div className="hidden sm:block">
-                  <span className="block text-xs font-semibold text-white">{user.name}</span>
-                  <span className="block text-[10px] text-slate-400 uppercase">{user.role?.replace('ROLE_', '')}</span>
+                <div className="hidden lg:block">
+                  <span className="block text-xs font-bold text-white leading-tight">{user.name}</span>
+                  <span className="block text-[9px] text-slate-400 uppercase">{user.role?.replace('ROLE_', '')}</span>
                 </div>
               </Link>
               <button
@@ -99,11 +158,11 @@ export const Navbar = () => {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-3">
-              <Link to="/login" className="btn-secondary text-xs px-4 py-2">
+            <div className="flex items-center gap-2">
+              <Link to="/login" className="btn-secondary text-xs px-3.5 py-1.5">
                 Sign In
               </Link>
-              <Link to="/register" className="btn-primary text-xs px-4 py-2">
+              <Link to="/register" className="btn-primary text-xs px-3.5 py-1.5">
                 Register
               </Link>
             </div>

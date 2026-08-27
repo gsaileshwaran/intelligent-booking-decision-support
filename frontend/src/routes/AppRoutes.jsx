@@ -12,6 +12,11 @@ import { BookingHistoryPage } from '../pages/customer/BookingHistoryPage';
 import { CustomerProfilePage } from '../pages/customer/CustomerProfilePage';
 import { LoginPage } from '../pages/customer/LoginPage';
 import { RegisterPage } from '../pages/customer/RegisterPage';
+import { TheatresPage } from '../pages/customer/TheatresPage';
+import { TheatreDetailsPage } from '../pages/customer/TheatreDetailsPage';
+import { OffersPage } from '../pages/customer/OffersPage';
+import { WatchlistPage } from '../pages/customer/WatchlistPage';
+import { DigitalTicketPage } from '../pages/customer/DigitalTicketPage';
 
 // Provider Pages
 import { ProviderDashboardPage } from '../pages/provider/ProviderDashboardPage';
@@ -31,10 +36,29 @@ export const AppRoutes = () => {
       <Route path="/" element={<Navigate to="/movies" replace />} />
       <Route path="/movies" element={<HomePage />} />
       <Route path="/movies/:id" element={<MovieDetailsPage />} />
+      <Route path="/theatres" element={<TheatresPage />} />
+      <Route path="/theatres/:id" element={<TheatreDetailsPage />} />
+      <Route path="/offers" element={<OffersPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
       {/* Customer Protected Routes */}
+      <Route
+        path="/watchlist"
+        element={
+          <ProtectedRoute>
+            <WatchlistPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tickets/:id"
+        element={
+          <ProtectedRoute>
+            <DigitalTicketPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/shows/:id/seats"
         element={
