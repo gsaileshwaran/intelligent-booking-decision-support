@@ -1,0 +1,67 @@
+[
+  {
+    "scenario": "AI Search Hybrid (1c)",
+    "concurrency": 1,
+    "requests": 20,
+    "rps": 13.262626733453798,
+    "p50_ms": 86.88940000138246,
+    "p95_ms": 117.65010000090115,
+    "p99_ms": 117.65010000090115,
+    "failed": 0,
+    "status_dist": {
+      "200": 20
+    }
+  },
+  {
+    "scenario": "AI Search Hybrid (10c)",
+    "concurrency": 10,
+    "requests": 40,
+    "rps": 35.597570181418746,
+    "p50_ms": 340.77380000962876,
+    "p95_ms": 404.0069000038784,
+    "p99_ms": 406.01829999650363,
+    "failed": 0,
+    "status_dist": {
+      "200": 40
+    }
+  },
+  {
+    "scenario": "AI Search Hybrid (25c)",
+    "concurrency": 25,
+    "requests": 75,
+    "rps": 37.30685309477785,
+    "p50_ms": 516.3878000021214,
+    "p95_ms": 836.8316999985836,
+    "p99_ms": 864.299500011839,
+    "failed": 0,
+    "status_dist": {
+      "200": 75
+    }
+  },
+  {
+    "scenario": "AI Search Hybrid (50c)",
+    "concurrency": 50,
+    "requests": 100,
+    "rps": 36.14330284673856,
+    "p50_ms": 1141.6756000107853,
+    "p95_ms": 1570.417799986899,
+    "p99_ms": 1704.9393000052078,
+    "failed": 0,
+    "status_dist": {
+      "200": 100
+    }
+  },
+  {
+    "scenario": "AI Search Hybrid (100c)",
+    "concurrency": 100,
+    "requests": 150,
+    "rps": 31.402234763074876,
+    "p50_ms": 2141.952300007688,
+    "p95_ms": 4263.862799998606,
+    "p99_ms": 4671.244699988165,
+    "failed": 0,
+    "status_dist": {
+      "200": 150
+    }
+  }
+]

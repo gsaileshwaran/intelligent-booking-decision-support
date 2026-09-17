@@ -1,0 +1,67 @@
+[
+  {
+    "scenario": "Catalog Discovery (1c)",
+    "concurrency": 1,
+    "requests": 30,
+    "rps": 135.9061884922619,
+    "p50_ms": 5.567300002439879,
+    "p95_ms": 19.950599991716444,
+    "p99_ms": 21.723400001064874,
+    "failed": 0,
+    "status_dist": {
+      "200": 30
+    }
+  },
+  {
+    "scenario": "Catalog Discovery (10c)",
+    "concurrency": 10,
+    "requests": 50,
+    "rps": 359.92015532488915,
+    "p50_ms": 16.651500001898967,
+    "p95_ms": 59.16980000620242,
+    "p99_ms": 73.8917999988189,
+    "failed": 0,
+    "status_dist": {
+      "200": 50
+    }
+  },
+  {
+    "scenario": "Catalog Discovery (25c)",
+    "concurrency": 25,
+    "requests": 100,
+    "rps": 281.75228508437624,
+    "p50_ms": 67.63109999883454,
+    "p95_ms": 182.12700000731274,
+    "p99_ms": 255.76230000297073,
+    "failed": 0,
+    "status_dist": {
+      "200": 100
+    }
+  },
+  {
+    "scenario": "Catalog Discovery (50c)",
+    "concurrency": 50,
+    "requests": 150,
+    "rps": 246.79142356892683,
+    "p50_ms": 127.61250000039581,
+    "p95_ms": 445.5573000013828,
+    "p99_ms": 553.6836000101175,
+    "failed": 0,
+    "status_dist": {
+      "200": 150
+    }
+  },
+  {
+    "scenario": "Catalog Discovery (100c)",
+    "concurrency": 100,
+    "requests": 200,
+    "rps": 244.09676386320615,
+    "p50_ms": 270.95969999209046,
+    "p95_ms": 720.3714000061154,
+    "p99_ms": 769.8531999922125,
+    "failed": 0,
+    "status_dist": {
+      "200": 200
+    }
+  }
+]

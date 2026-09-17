@@ -1,0 +1,11 @@
+# Ignore generated test execution artifacts
+**/test-artifacts/
+**/results.json
+*.log
+*.zip
+*.png
+*.webm
+*.xml
+*.json
+!.gitignore
+!README.md

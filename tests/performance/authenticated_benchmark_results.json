@@ -1,0 +1,41 @@
+[
+  {
+    "scenario": "Auth Me Customer (25c)",
+    "concurrency": 25,
+    "requests": 100,
+    "rps": 218.14599464516206,
+    "p50_ms": 78.95060000009835,
+    "p95_ms": 249.02709999878425,
+    "p99_ms": 335.4254000005312,
+    "failed": 0,
+    "status_dist": {
+      "200": 100
+    }
+  },
+  {
+    "scenario": "Manager Schedule (25c)",
+    "concurrency": 25,
+    "requests": 100,
+    "rps": 260.94099498216224,
+    "p50_ms": 78.69470000150613,
+    "p95_ms": 165.3950000036275,
+    "p99_ms": 279.10569999949075,
+    "failed": 0,
+    "status_dist": {
+      "200": 100
+    }
+  },
+  {
+    "scenario": "Admin Audit Logs (25c)",
+    "concurrency": 25,
+    "requests": 100,
+    "rps": 203.3180695725128,
+    "p50_ms": 89.53939999628346,
+    "p95_ms": 246.87449999328237,
+    "p99_ms": 406.6930999979377,
+    "failed": 0,
+    "status_dist": {
+      "200": 100
+    }
+  }
+]

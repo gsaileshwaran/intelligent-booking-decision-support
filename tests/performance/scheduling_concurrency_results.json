@@ -1,0 +1,30 @@
+{
+  "case_a": {
+    "case": "Case A (Non-Overlapping)",
+    "r1_status": 201,
+    "r2_status": 201,
+    "elapsed_ms": 26.420099995448254,
+    "pass": true
+  },
+  "case_b": {
+    "case": "Case B (Overlapping Race)",
+    "statuses": [
+      201,
+      409
+    ],
+    "elapsed_ms": 22.62479999626521,
+    "pass": true
+  },
+  "case_c": {
+    "case": "Case C (Different Screens)",
+    "r_a_status": 201,
+    "r_b_status": 201,
+    "elapsed_ms": 17.92169999680482,
+    "pass": true
+  },
+  "integrity": {
+    "atomicity_passed": true,
+    "orphan_seats": 0
+  },
+  "overall_pass": true
+}
