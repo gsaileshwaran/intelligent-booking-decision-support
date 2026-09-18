@@ -17,6 +17,7 @@ import com.pvk.cinemas.decision.dto.ShowRecommendationRequest;
 import com.pvk.cinemas.decision.dto.ShowRecommendationResponse;
 import com.pvk.cinemas.infrastructure.model.Screen;
 import com.pvk.cinemas.infrastructure.model.Seat;
+import com.pvk.cinemas.common.time.BusinessDateProvider;
 import com.pvk.cinemas.infrastructure.repository.ScreenRepository;
 import com.pvk.cinemas.infrastructure.repository.SeatRepository;
 import com.pvk.cinemas.organization.model.City;
@@ -64,6 +65,7 @@ public class ShowRecommendationEngine {
     private final SeatScoringEngine seatScoringEngine;
     private final com.pvk.cinemas.booking.service.SeatPricingService seatPricingService;
     private final SeatGroupPlanner seatGroupPlanner;
+    private final BusinessDateProvider businessDateProvider;
 
     public ShowRecommendationEngine(ShowRepository showRepository,
                                     ShowSeatRepository showSeatRepository,
@@ -79,7 +81,8 @@ public class ShowRecommendationEngine {
                                     SeatHoldService seatHoldService,
                                     SeatScoringEngine seatScoringEngine,
                                     com.pvk.cinemas.booking.service.SeatPricingService seatPricingService,
-                                    SeatGroupPlanner seatGroupPlanner) {
+                                    SeatGroupPlanner seatGroupPlanner,
+                                    BusinessDateProvider businessDateProvider) {
         this.showRepository = showRepository;
         this.showSeatRepository = showSeatRepository;
         this.movieRepository = movieRepository;
@@ -95,6 +98,7 @@ public class ShowRecommendationEngine {
         this.seatScoringEngine = seatScoringEngine;
         this.seatPricingService = seatPricingService;
         this.seatGroupPlanner = seatGroupPlanner;
+        this.businessDateProvider = businessDateProvider;
     }
 
     public ShowRecommendationResponse recommendShows(Long movieId, ShowRecommendationRequest request) {
@@ -163,18 +167,19 @@ public class ShowRecommendationEngine {
         candidateShows = new ArrayList<>(distinctShowsMap.values());
 
         // =====================================================================
-        // HARD CONSTRAINT 1: Date Range Filter
+        // HARD CONSTRAINT 1: Date Range Filter (Enforce Authoritative Business Date)
         // =====================================================================
         LocalDate dateFrom = request.getDateFrom();
         LocalDate dateTo = request.getDateTo();
-        if (dateFrom != null || dateTo != null) {
-            candidateShows = candidateShows.stream().filter(s -> {
-                LocalDate showDate = s.getStartAt().atZone(IST_ZONE).toLocalDate();
-                if (dateFrom != null && showDate.isBefore(dateFrom)) return false;
-                if (dateTo != null && showDate.isAfter(dateTo)) return false;
-                return true;
-            }).toList();
-        }
+        LocalDate authoritativeToday = businessDateProvider.getBusinessDate();
+        LocalDate effectiveDateFrom = dateFrom != null && !dateFrom.isBefore(authoritativeToday) ? dateFrom : authoritativeToday;
+
+        candidateShows = candidateShows.stream().filter(s -> {
+            LocalDate showDate = s.getStartAt().atZone(IST_ZONE).toLocalDate();
+            if (showDate.isBefore(effectiveDateFrom)) return false;
+            if (dateTo != null && showDate.isAfter(dateTo)) return false;
+            return true;
+        }).toList();
 
         if (candidateShows.isEmpty()) {
             String noDateMsg = dateFrom != null || dateTo != null
@@ -308,7 +313,7 @@ public class ShowRecommendationEngine {
             double availabilityRatio = totalSeats > 0 ? (double) availableCount / totalSeats : 0.0;
 
             // Authoritative Shared Group Seating Evaluation
-            List<Seat> allScreenSeats = seatRepository.findAllById(showSeats.stream().map(ss -> ss.getId().getSeatId()).toList());
+            List<Seat> allScreenSeats = screenSeatsCache.computeIfAbsent(screen.getScreenId(), id -> seatRepository.findByScreenId(id));
             if (allScreenSeats == null || allScreenSeats.isEmpty()) {
                 allScreenSeats = seatRepository.findByScreenId(screen.getScreenId());
             }

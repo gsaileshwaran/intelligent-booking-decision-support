@@ -58,9 +58,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ErrorResponse> handleBadRequest(BadRequestException ex, HttpServletRequest request) {
         String traceId = UUID.randomUUID().toString();
+        String code = ex.getErrorCode() != null ? ex.getErrorCode() : "VALIDATION_FAILED";
         ErrorResponse err = new ErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
-                "VALIDATION_FAILED",
+                code,
                 ex.getMessage(),
                 request.getRequestURI(),
                 traceId

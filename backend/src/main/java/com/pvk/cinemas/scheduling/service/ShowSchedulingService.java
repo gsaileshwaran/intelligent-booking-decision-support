@@ -12,6 +12,7 @@ import com.pvk.cinemas.catalogue.repository.MovieRepository;
 import com.pvk.cinemas.catalogue.repository.PresentationFormatRepository;
 import com.pvk.cinemas.booking.service.SeatPricingService;
 import com.pvk.cinemas.common.exceptions.BadRequestException;
+import com.pvk.cinemas.common.time.BusinessDateProvider;
 import com.pvk.cinemas.common.exceptions.InvalidCapabilityException;
 import com.pvk.cinemas.common.exceptions.InvalidMovieLanguageException;
 import com.pvk.cinemas.common.exceptions.ResourceNotFoundException;
@@ -62,6 +63,7 @@ public class ShowSchedulingService {
     private final AuditLogService auditLogService;
     private final PresentationFormatRepository presentationFormatRepository;
     private final SeatPricingService seatPricingService;
+    private final BusinessDateProvider businessDateProvider;
 
     public ShowSchedulingService(ShowRepository showRepository,
                                  ShowSeatRepository showSeatRepository,
@@ -75,7 +77,8 @@ public class ShowSchedulingService {
                                  SeatRepository seatRepository,
                                  AuditLogService auditLogService,
                                  PresentationFormatRepository presentationFormatRepository,
-                                 SeatPricingService seatPricingService) {
+                                 SeatPricingService seatPricingService,
+                                 BusinessDateProvider businessDateProvider) {
         this.showRepository = showRepository;
         this.showSeatRepository = showSeatRepository;
         this.screenRepository = screenRepository;
@@ -89,6 +92,7 @@ public class ShowSchedulingService {
         this.auditLogService = auditLogService;
         this.presentationFormatRepository = presentationFormatRepository;
         this.seatPricingService = seatPricingService;
+        this.businessDateProvider = businessDateProvider;
     }
 
     /**
@@ -344,8 +348,20 @@ public class ShowSchedulingService {
 
         if (s.getStartAt() != null) {
             ZonedDateTime zdt = s.getStartAt().atZone(IST_ZONE);
-            resp.setShowDate(zdt.toLocalDate().toString());
+            LocalDate showDate = zdt.toLocalDate();
+            resp.setShowDate(showDate.toString());
             resp.setStartTime(TIME_FORMATTER.format(s.getStartAt()).toUpperCase(Locale.ENGLISH));
+
+            boolean isPast = businessDateProvider.isPast(showDate);
+            boolean isBookable = businessDateProvider.isBookable(showDate);
+            resp.setBookable(isBookable);
+            if (isPast) {
+                resp.setBookingEligibility("SHOW_DATE_IN_PAST");
+            } else if (isBookable) {
+                resp.setBookingEligibility("BOOKABLE");
+            } else {
+                resp.setBookingEligibility("OUTSIDE_DEMO_WINDOW");
+            }
         }
 
         return resp;

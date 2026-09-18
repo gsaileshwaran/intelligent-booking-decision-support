@@ -29,6 +29,8 @@ public class ShowResponse {
     private Integer availableSeatCount;
     private java.math.BigDecimal startingPrice;
     private String language;
+    private Boolean bookable;
+    private String bookingEligibility;
 
     public ShowResponse() {}
 
@@ -113,4 +115,11 @@ public class ShowResponse {
 
     public String getLanguage() { return language != null ? language : languageName; }
     public void setLanguage(String language) { this.language = language; }
+
+    public Boolean getBookable() { return bookable; }
+    public void setBookable(Boolean bookable) { this.bookable = bookable; }
+
+    public String getBookingEligibility() { return bookingEligibility; }
+    public void setBookingEligibility(String bookingEligibility) { this.bookingEligibility = bookingEligibility; }
 }
+

@@ -76,4 +76,9 @@ public class Show {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public java.time.LocalDate getShowDate() {
+        if (startAt == null) return null;
+        return startAt.atZone(java.time.ZoneId.of("Asia/Kolkata")).toLocalDate();
+    }
 }

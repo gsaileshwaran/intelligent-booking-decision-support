@@ -4,7 +4,7 @@ import {
   ShieldCheck, AlertTriangle, Users, DollarSign, Target, Zap,
   TrendingUp, Award, ChevronDown, ChevronUp, Play
 } from 'lucide-react';
-import { moviesApi, decisionApi } from '../../api/client';
+import { moviesApi, decisionApi, systemApi } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import type { Movie } from '../../types/movie';
 import type { Show } from '../../types/show';
@@ -22,7 +22,7 @@ interface MovieDetailsViewProps {
 interface TheatreGroup {
   theatreId: number;
   theatreName: string;
-  screens: { screenId: number; screenName: string; shows: Show[] }[];
+  shows: Show[];
 }
 
 type Priority = 'BEST_PRICE' | 'BEST_SEATS' | 'BEST_TIME' | 'BALANCED';
@@ -76,16 +76,39 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
   // Multiplex selection
   const [selectedTheatreId, setSelectedTheatreId] = useState<number | null>(initialTheatreId ?? null);
 
-  // Available schedule dates derived from actual shows
+  // Authoritative business date from backend provider (defaults to 2026-09-18)
+  const [businessDate, setBusinessDate] = useState<string>('2026-09-18');
+  const [demoDates, setDemoDates] = useState<string[]>([]);
+
+  useEffect(() => {
+    systemApi.getBusinessDate()
+      .then(info => {
+        if (info.businessDate) setBusinessDate(info.businessDate);
+        if (info.demoDates) setDemoDates(info.demoDates);
+      })
+      .catch(err => console.warn('Could not fetch business date:', err));
+  }, []);
+
+  // Available schedule dates derived from actual shows and business date window
   const availableDates = useMemo(() => {
     const set = new Set<string>();
     shows.forEach((s) => {
       if (s.startAt) {
-        set.add(s.startAt.slice(0, 10));
+        const d = s.startAt.slice(0, 10);
+        // Only include dates on or after authoritative business date (no past dates for booking discovery)
+        if (d >= businessDate) {
+          set.add(d);
+        }
+      }
+    });
+    // Ensure all demo dates that have shows are present
+    demoDates.forEach(d => {
+      if (shows.some(s => s.startAt?.startsWith(d))) {
+        set.add(d);
       }
     });
     return Array.from(set).sort();
-  }, [shows]);
+  }, [shows, businessDate, demoDates]);
 
   const [selectedDate, setSelectedDate] = useState<string>(initialDate || '');
 
@@ -111,15 +134,14 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
     return availableTheatres.find((t) => t.id === selectedTheatreId)?.name || null;
   }, [selectedTheatreId, availableTheatres]);
 
-  // Date formatting helpers
+  // Date formatting helpers — "Today" is strictly derived from authoritative business date
   const formatDateLabel = (dateStr: string) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
     const dateObj = new Date(dateStr + 'T00:00:00');
     const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
     const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' });
     const dayNum = dateObj.getDate();
 
-    if (dateStr === todayStr) {
+    if (dateStr === businessDate) {
       return { prefix: 'Today', sub: `${dayNum} ${monthName}` };
     }
     return { prefix: dayName, sub: `${dayNum} ${monthName}` };
@@ -252,22 +274,24 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
     // Authoritative distinct screening count: distinct showIds on this date
     const distinctShowIds = new Set(filtered.map((s) => s.showId));
 
-    const map = new Map<number, { theatreName: string; screenMap: Map<number, { screenName: string; shows: Show[] }> }>();
+    // Group directly by theatre (no nested screen containers) and sort chronologically
+    const map = new Map<number, { theatreName: string; showsMap: Map<number, Show> }>();
     filtered.forEach((show) => {
-      if (!map.has(show.theatreId)) map.set(show.theatreId, { theatreName: show.theatreName, screenMap: new Map() });
+      if (!map.has(show.theatreId)) {
+        map.set(show.theatreId, { theatreName: show.theatreName, showsMap: new Map() });
+      }
       const te = map.get(show.theatreId)!;
-      if (!te.screenMap.has(show.screenId)) te.screenMap.set(show.screenId, { screenName: show.screenName, shows: [] });
-      te.screenMap.get(show.screenId)!.shows.push(show);
+      if (!te.showsMap.has(show.showId)) {
+        te.showsMap.set(show.showId, show);
+      }
     });
 
     const groups: TheatreGroup[] = Array.from(map.entries()).map(([theatreId, entry]) => ({
       theatreId,
       theatreName: entry.theatreName,
-      screens: Array.from(entry.screenMap.entries()).map(([screenId, se]) => ({
-        screenId,
-        screenName: se.screenName,
-        shows: se.shows.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
-      })),
+      shows: Array.from(entry.showsMap.values()).sort(
+        (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+      ),
     }));
 
     return { theatreGroups: groups, totalScreeningsOnDate: distinctShowIds.size };
@@ -958,31 +982,57 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
             <p style={{ marginTop: '8px' }}>Try adjusting your format or timing filters above.</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {theatreGroups.map(group => (
-              <div key={group.theatreId} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} data-testid={`theatre-showtime-group-${group.theatreId}`}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div
+                key={group.theatreId}
+                className="card"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  padding: '24px',
+                }}
+                data-testid={`theatre-showtime-group-${group.theatreId}`}
+              >
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  paddingBottom: '12px',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <MapPin size={20} color="var(--accent-crimson)" />
-                    <h3 style={{ fontSize: '1.25rem' }}>{group.theatreName}</h3>
+                    <h3 style={{ fontSize: '1.25rem', margin: 0 }}>{group.theatreName}</h3>
+                    <span className="badge badge-slate" style={{ fontSize: '0.75rem' }}>
+                      {group.shows.length} {group.shows.length === 1 ? 'Show' : 'Shows'}
+                    </span>
                   </div>
                   <button onClick={() => onNavigate('theatre-details', group.theatreId)} className="btn btn-sm btn-outline">
                     Multiplex Details
                   </button>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                  {group.screens.map(screen => (
-                    <div key={screen.screenId} style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Tv size={16} color="var(--accent-gold)" />
-                        <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{screen.screenName}</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                        {screen.shows.map(show => (
-                          <ShowtimePill key={show.showId} show={show} onSelect={id => onNavigate('show-seats', { showId: id, partySize })} />
-                        ))}
-                      </div>
-                    </div>
+
+                {/* Horizontal responsive showtime cards (desktop: 5 across, mobile: responsive wrap) */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(185px, 1fr))',
+                    gap: '14px',
+                    width: '100%',
+                    alignItems: 'stretch',
+                  }}
+                  data-testid={`theatre-showtimes-grid-${group.theatreId}`}
+                >
+                  {group.shows.map(show => (
+                    <ShowtimePill
+                      key={show.showId}
+                      show={show}
+                      onSelect={id => onNavigate('show-seats', { showId: id, partySize })}
+                    />
                   ))}
                 </div>
               </div>

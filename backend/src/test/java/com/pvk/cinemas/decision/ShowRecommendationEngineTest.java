@@ -87,12 +87,14 @@ class ShowRecommendationEngineTest {
         seatScoringEngine = Mockito.mock(SeatScoringEngine.class);
         seatPricingService = Mockito.mock(com.pvk.cinemas.booking.service.SeatPricingService.class);
         SeatGroupPlanner seatGroupPlanner = new SeatGroupPlanner(seatScoringEngine, seatPricingService);
+        com.pvk.cinemas.common.time.BusinessDateProvider businessDateProvider = new com.pvk.cinemas.common.time.BusinessDateProvider("2026-09-18", 7);
 
         engine = new ShowRecommendationEngine(
                 showRepository, showSeatRepository, movieRepository, movieLanguageRepository,
                 languageRepository, screenCapabilityRepository, presentationFormatRepository,
                 screenRepository, seatRepository, theatreRepository, cityRepository,
-                seatHoldService, seatScoringEngine, seatPricingService, seatGroupPlanner
+                seatHoldService, seatScoringEngine, seatPricingService, seatGroupPlanner,
+                businessDateProvider
         );
 
         // Movie

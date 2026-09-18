@@ -464,3 +464,19 @@ export const adminApi = {
     });
   },
 };
+
+export interface BusinessDateInfo {
+  businessDate: string;
+  windowStartDate: string;
+  windowEndDate: string;
+  windowDays: number;
+  demoDates: string[];
+  timeZone: string;
+}
+
+export const systemApi = {
+  getBusinessDate: async (): Promise<BusinessDateInfo> => {
+    return request<BusinessDateInfo>('/api/v1/system/business-date');
+  },
+};
+

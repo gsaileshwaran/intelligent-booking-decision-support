@@ -5,12 +5,15 @@ import com.pvk.cinemas.availability.repository.ShowSeatRepository;
 import com.pvk.cinemas.booking.dto.SeatHoldResponse;
 import com.pvk.cinemas.booking.model.SeatHold;
 import com.pvk.cinemas.booking.repository.SeatHoldRepository;
+import com.pvk.cinemas.common.exceptions.BadRequestException;
 import com.pvk.cinemas.common.exceptions.ConflictException;
 import com.pvk.cinemas.common.exceptions.ResourceNotFoundException;
+import com.pvk.cinemas.common.time.BusinessDateProvider;
 import com.pvk.cinemas.infrastructure.model.Seat;
 import com.pvk.cinemas.infrastructure.model.SeatType;
 import com.pvk.cinemas.infrastructure.repository.SeatRepository;
 import com.pvk.cinemas.infrastructure.repository.SeatTypeRepository;
+import com.pvk.cinemas.scheduling.model.Show;
 import com.pvk.cinemas.scheduling.repository.ShowRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 
 @Service
@@ -35,19 +39,22 @@ public class SeatHoldService {
     private final SeatRepository seatRepository;
     private final SeatTypeRepository seatTypeRepository;
     private final SeatPricingService seatPricingService;
+    private final BusinessDateProvider businessDateProvider;
 
     public SeatHoldService(SeatHoldRepository seatHoldRepository,
                            ShowSeatRepository showSeatRepository,
                            ShowRepository showRepository,
                            SeatRepository seatRepository,
                            SeatTypeRepository seatTypeRepository,
-                           SeatPricingService seatPricingService) {
+                           SeatPricingService seatPricingService,
+                           BusinessDateProvider businessDateProvider) {
         this.seatHoldRepository = seatHoldRepository;
         this.showSeatRepository = showSeatRepository;
         this.showRepository = showRepository;
         this.seatRepository = seatRepository;
         this.seatTypeRepository = seatTypeRepository;
         this.seatPricingService = seatPricingService;
+        this.businessDateProvider = businessDateProvider;
     }
 
     /**
@@ -61,8 +68,15 @@ public class SeatHoldService {
         if (seatIds == null || seatIds.isEmpty()) {
             throw new IllegalArgumentException("At least one seat must be selected to hold");
         }
-        if (!showRepository.existsById(showId)) {
-            throw new ResourceNotFoundException("Show not found with ID: " + showId);
+        Show show = showRepository.findById(showId)
+                .orElseThrow(() -> new ResourceNotFoundException("Show not found with ID: " + showId));
+
+        // Part A / Business Date Validation: Past date booking must fail server-side
+        LocalDate showDate = show.getShowDate();
+        if (businessDateProvider.isPast(showDate)) {
+            throw new BadRequestException("SHOW_DATE_IN_PAST",
+                    String.format("SHOW_DATE_IN_PAST: Show date %s is before authoritative business date %s and cannot be booked.",
+                            showDate, businessDateProvider.getBusinessDate()));
         }
 
         // Prevent duplicate seat IDs in the selection

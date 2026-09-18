@@ -17,8 +17,10 @@ import com.pvk.cinemas.catalogue.repository.LanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieLanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieRepository;
 import com.pvk.cinemas.catalogue.repository.PresentationFormatRepository;
+import com.pvk.cinemas.common.exceptions.BadRequestException;
 import com.pvk.cinemas.common.exceptions.ConflictException;
 import com.pvk.cinemas.common.exceptions.ResourceNotFoundException;
+import com.pvk.cinemas.common.time.BusinessDateProvider;
 import com.pvk.cinemas.infrastructure.model.Seat;
 import com.pvk.cinemas.infrastructure.model.SeatType;
 import com.pvk.cinemas.infrastructure.repository.ScreenRepository;
@@ -65,6 +67,7 @@ public class BookingService {
     private final SeatRepository seatRepository;
     private final SeatTypeRepository seatTypeRepository;
     private final SeatHoldService seatHoldService;
+    private final BusinessDateProvider businessDateProvider;
 
     public BookingService(BookingRepository bookingRepository,
                           BookingSeatRepository bookingSeatRepository,
@@ -82,7 +85,8 @@ public class BookingService {
                           CityRepository cityRepository,
                           SeatRepository seatRepository,
                           SeatTypeRepository seatTypeRepository,
-                          SeatHoldService seatHoldService) {
+                          SeatHoldService seatHoldService,
+                          BusinessDateProvider businessDateProvider) {
         this.bookingRepository = bookingRepository;
         this.bookingSeatRepository = bookingSeatRepository;
         this.paymentRepository = paymentRepository;
@@ -100,6 +104,7 @@ public class BookingService {
         this.seatRepository = seatRepository;
         this.seatTypeRepository = seatTypeRepository;
         this.seatHoldService = seatHoldService;
+        this.businessDateProvider = businessDateProvider;
     }
 
     /**
@@ -133,6 +138,13 @@ public class BookingService {
         }
 
         Long showId = firstHold.getShowId();
+        Show show = showRepository.findById(showId)
+                .orElseThrow(() -> new ResourceNotFoundException("Show not found with ID: " + showId));
+        if (businessDateProvider.isPast(show.getShowDate())) {
+            throw new BadRequestException("SHOW_DATE_IN_PAST",
+                    String.format("SHOW_DATE_IN_PAST: Show date %s is before authoritative business date %s and cannot be booked.",
+                            show.getShowDate(), businessDateProvider.getBusinessDate()));
+        }
         List<Long> seatIds = holds.stream().map(SeatHold::getSeatId).toList();
 
         // Calculate total amount
