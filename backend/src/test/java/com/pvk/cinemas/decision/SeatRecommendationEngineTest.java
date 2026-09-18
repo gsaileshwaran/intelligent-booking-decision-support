@@ -6,6 +6,8 @@ import com.pvk.cinemas.decision.dto.RecommendedBlock;
 import com.pvk.cinemas.decision.dto.SeatRecommendationRequest;
 import com.pvk.cinemas.decision.dto.SeatRecommendationResponse;
 import com.pvk.cinemas.decision.dto.SeatScoreDTO;
+import com.pvk.cinemas.booking.service.SeatPricingService;
+import com.pvk.cinemas.decision.engine.SeatGroupPlanner;
 import com.pvk.cinemas.decision.engine.SeatRecommendationEngine;
 import com.pvk.cinemas.decision.engine.SeatScoringEngine;
 import com.pvk.cinemas.infrastructure.model.Seat;
@@ -29,7 +31,8 @@ class SeatRecommendationEngineTest {
     private ShowSeatRepository showSeatRepository;
     private SeatRepository seatRepository;
     private SeatScoringEngine seatScoringEngine;
-    private com.pvk.cinemas.booking.service.SeatPricingService seatPricingService;
+    private SeatPricingService seatPricingService;
+    private SeatGroupPlanner seatGroupPlanner;
     private SeatRecommendationEngine engine;
 
     @BeforeEach
@@ -38,7 +41,8 @@ class SeatRecommendationEngineTest {
         seatRepository = Mockito.mock(SeatRepository.class);
         seatScoringEngine = Mockito.mock(SeatScoringEngine.class);
         seatPricingService = Mockito.mock(com.pvk.cinemas.booking.service.SeatPricingService.class);
-        engine = new SeatRecommendationEngine(showSeatRepository, seatRepository, seatScoringEngine, seatPricingService);
+        seatGroupPlanner = new SeatGroupPlanner(seatScoringEngine, seatPricingService);
+        engine = new SeatRecommendationEngine(showSeatRepository, seatRepository, seatGroupPlanner);
     }
 
     private Seat createSeat(Long seatId, Long screenId, String row, String num) {

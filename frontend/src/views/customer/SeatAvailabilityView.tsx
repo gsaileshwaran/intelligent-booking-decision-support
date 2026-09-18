@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowLeft, RefreshCw, Tv, MapPin, Film, Sparkles, Clock, AlertTriangle, CheckCircle, ShieldCheck } from 'lucide-react';
 import { showsApi, seatHoldApi, decisionApi } from '../../api/client';
 import type { ShowSeatAvailabilityResponse, Show } from '../../types/show';
@@ -34,16 +34,37 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
   const [handoffNotice, setHandoffNotice] = useState<{ type: 'success' | 'stale'; message: string } | null>(null);
   const hasHandledHandoffRef = useRef(false);
 
+  // Undo AI Selection: snapshot of selection before the most recent AI apply
+  const [lastAiAppliedSeatIds, setLastAiAppliedSeatIds] = useState<number[] | null>(null);
+  const preAiSelectionRef = useRef<number[]>([]);
+
   // Intelligent Decision Engine States
   const [seatScores, setSeatScores] = useState<Record<number, SeatQualityScore>>({});
   const [recommendations, setRecommendations] = useState<SeatRecommendations | null>(null);
   const [guidance, setGuidance] = useState<DecisionGuidance | null>(null);
-  const [partySize, setPartySize] = useState<number>(initialPartySize && initialPartySize >= 1 && initialPartySize <= 8 ? initialPartySize : 2);
+  const [partySize, setPartySize] = useState<number>(initialPartySize && initialPartySize >= 1 ? initialPartySize : 2);
   const [isChangingPartySize, setIsChangingPartySize] = useState(false);
   const [showAiSuggestions, setShowAiSuggestions] = useState(false);
   const [aiSelectionError, setAiSelectionError] = useState<string | null>(null);
   const [seatToggleCount, setSeatToggleCount] = useState<number>(0);
   const [interactionFriction, setInteractionFriction] = useState<InteractionFriction | null>(null);
+  const [highlightedSeatIds, setHighlightedSeatIds] = useState<number[]>([]);
+  const [isFetchingRecs, setIsFetchingRecs] = useState<boolean>(false);
+
+  const maxAvailableSeats = useMemo(() => {
+    if (!availability) return 100;
+    if (typeof availability.availableSeats === 'number' && availability.availableSeats >= 0) {
+      return availability.availableSeats;
+    }
+    const count = availability.seats?.filter((s) => s.availabilityStatus === 'AVAILABLE' && s.physicalStatus !== 'BLOCKED').length;
+    return typeof count === 'number' ? count : 100;
+  }, [availability]);
+
+  useEffect(() => {
+    if (maxAvailableSeats > 0 && partySize > maxAvailableSeats) {
+      setPartySize(maxAvailableSeats);
+    }
+  }, [maxAvailableSeats]);
 
   // Seat Hold & Checkout States
   const [holdToken, setHoldToken] = useState<string | null>(null);
@@ -76,6 +97,8 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
         });
 
         if (allAvailable) {
+          preAiSelectionRef.current = [];
+          setLastAiAppliedSeatIds(requestedSeats);
           setSelectedSeatIds(requestedSeats);
           const labelsText = initialRecommendedSeatLabels && initialRecommendedSeatLabels.length > 0
             ? initialRecommendedSeatLabels.join(', ')
@@ -85,35 +108,17 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
             message: `AI Recommendation applied: Selected optimal seats (${labelsText}) based on your preferences. You can adjust your selection below.`,
           });
         } else {
-          // Stale recommendation: One or more seats became HELD or BOOKED in the interim
-          try {
-            const freshRecs = await decisionApi.getRecommendations(showId, partySize);
-            setRecommendations(freshRecs);
-            if (freshRecs && freshRecs.recommendations && freshRecs.recommendations.length > 0) {
-              const bestRec = freshRecs.recommendations[0];
-              const freshIds = bestRec.seatIds;
-              const freshLabels = bestRec.seatLabels?.join(', ') || freshIds.join(', ');
-              setSelectedSeatIds(freshIds);
-              setHandoffNotice({
-                type: 'stale',
-                message: `One or more originally recommended seats became unavailable (held or booked). We updated your recommendation to seats ${freshLabels} (${bestRec.rationale || 'Optimal viewing sweet spot'}).`,
-              });
-            } else {
-              setHandoffNotice({
-                type: 'stale',
-                message: 'One or more originally recommended seats are no longer available. Please select your preferred seats from the map below.',
-              });
-            }
-          } catch (e) {
-            setHandoffNotice({
-              type: 'stale',
-              message: 'One or more originally recommended seats are no longer available. Please select your preferred seats from the map below.',
-            });
-          }
+          // Stale recommendation: One or more seats became HELD or BOOKED in the interim.
+          // Reject stale application cleanly without silent substitution or automatic AI requests.
+          setSelectedSeatIds([]);
+          setHandoffNotice({
+            type: 'stale',
+            message: 'One or more originally recommended seats became unavailable (held or booked). Please click "Get AI Suggestions" or select your preferred seats from the map below.',
+          });
         }
       }
 
-      // Load Intelligent Engine: Seat Scores & Default Recommendations
+      // Load Intelligent Engine: Seat Scores
       try {
         const scores = await decisionApi.getSeatScores(showId);
         const scoreMap: Record<number, SeatQualityScore> = {};
@@ -121,9 +126,6 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
           scoreMap[s.seatId] = s;
         });
         setSeatScores(scoreMap);
-
-        const recs = await decisionApi.getRecommendations(showId, partySize);
-        setRecommendations(recs);
       } catch (decErr) {
         console.warn('Decision engine metadata unavailable', decErr);
       }
@@ -141,36 +143,6 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [showId]);
-
-  // Update recommendations when party size changes
-  useEffect(() => {
-    const updateRecs = async () => {
-      try {
-        const recs = await decisionApi.getRecommendations(showId, partySize);
-        setRecommendations(recs);
-      } catch (e) {
-        // ignore
-      }
-    };
-    if (availability) updateRecs();
-  }, [partySize, showId]);
-
-  // Update guidance whenever seat selection changes
-  useEffect(() => {
-    const updateGuidance = async () => {
-      if (selectedSeatIds.length === 0) {
-        setGuidance(null);
-        return;
-      }
-      try {
-        const g = await decisionApi.getGuidance(showId, selectedSeatIds);
-        setGuidance(g);
-      } catch (e) {
-        // ignore
-      }
-    };
-    updateGuidance();
-  }, [selectedSeatIds, showId]);
 
   // Hold Timer Management
   useEffect(() => {
@@ -206,6 +178,9 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
     // If hold is active, don't allow toggling seats
     if (holdToken) return;
 
+    // Any manual toggle clears the AI undo snapshot (user has diverged from AI suggestion)
+    setLastAiAppliedSeatIds(null);
+
     const nextCount = seatToggleCount + 1;
     setSeatToggleCount(nextCount);
     if (nextCount >= 6) {
@@ -220,13 +195,41 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
       if (prev.includes(seatId)) {
         return prev.filter((id) => id !== seatId);
       } else {
-        if (prev.length >= 8) {
-          alert('Maximum 8 seats per booking transaction.');
+        if (prev.length >= maxAvailableSeats) {
+          alert(`Cannot select more than available capacity (${maxAvailableSeats} seats) for this show.`);
           return prev;
         }
         return [...prev, seatId];
       }
     });
+  };
+
+  // Deliberate user action to fetch AI seat recommendations
+  const handleGetAiSuggestions = async () => {
+    try {
+      setIsFetchingRecs(true);
+      setShowAiSuggestions(true);
+      setAiSelectionError(null);
+      const recs = await decisionApi.getRecommendations(showId, partySize);
+      setRecommendations(recs);
+      if (selectedSeatIds.length > 0) {
+        decisionApi.getGuidance(showId, selectedSeatIds).then(setGuidance).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn('Failed to fetch recommendations', err);
+      setAiSelectionError(err.message || 'Failed to fetch AI suggestions');
+    } finally {
+      setIsFetchingRecs(false);
+    }
+  };
+
+  // Revert seat selection to the state it was in before the most recent AI recommendation was applied
+  const handleUndoAiSelection = () => {
+    setSelectedSeatIds(preAiSelectionRef.current);
+    setLastAiAppliedSeatIds(null);
+    setAiSelectionError(null);
+    setHighlightedSeatIds([]);
+    setGuidance(null);
   };
 
   const handleApplyRecommendation = async (seatIds: number[]) => {
@@ -244,16 +247,17 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
       });
 
       if (invalidSeats.length > 0) {
-        setAiSelectionError('Selected AI recommendation is no longer available (some seats were booked, held, or blocked). Fresh suggestions have been updated.');
-        try {
-          const freshRecs = await decisionApi.getRecommendations(showId, partySize);
-          setRecommendations(freshRecs);
-        } catch (e) {}
+        setAiSelectionError('Selected AI recommendation is no longer available (some seats were booked, held, or blocked). Please click "Refresh Suggestions" to view current recommendations.');
         return;
       }
 
+      // Snapshot the current selection BEFORE applying AI so the user can undo
+      preAiSelectionRef.current = [...selectedSeatIds];
+      setLastAiAppliedSeatIds(seatIds);
+
       // Valid: immediately update the authoritative manual seat selection state
       setSelectedSeatIds(seatIds);
+      setHighlightedSeatIds([]);
     } catch (err: any) {
       // Fallback local check
       const invalid = seatIds.filter((id) => {
@@ -263,7 +267,11 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
       if (invalid.length > 0) {
         setAiSelectionError('Selected seats are currently unavailable.');
       } else {
+        // Snapshot before applying
+        preAiSelectionRef.current = [...selectedSeatIds];
+        setLastAiAppliedSeatIds(seatIds);
         setSelectedSeatIds(seatIds);
+        setHighlightedSeatIds([]);
       }
     }
   };
@@ -407,7 +415,19 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
           ) : (
             <AlertTriangle size={20} color="#f59e0b" style={{ flexShrink: 0 }} />
           )}
-          <span style={{ fontWeight: 500 }}>{handoffNotice.message}</span>
+          <span style={{ fontWeight: 500, flex: 1 }}>{handoffNotice.message}</span>
+          {lastAiAppliedSeatIds !== null && (
+            <button
+              type="button"
+              onClick={handleUndoAiSelection}
+              className="btn btn-sm btn-outline"
+              style={{ fontSize: '0.8rem', gap: '6px', borderColor: 'rgba(16, 185, 129, 0.5)', color: '#6ee7b7', whiteSpace: 'nowrap' }}
+              title="Revert to the seat selection you had before applying this AI recommendation"
+              data-testid="undo-ai-selection-btn"
+            >
+              ↩ Undo AI Selection
+            </button>
+          )}
         </div>
       )}
 
@@ -529,8 +549,50 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                   Change
                 </button>
               ) : (
-                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                  {[1, 2, 3, 4, 5, 6].map((size) => (
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPartySize(prev => Math.max(1, prev - 1))}
+                      disabled={partySize <= 1}
+                      className="btn btn-sm btn-ghost"
+                      style={{ height: '24px', width: '24px', padding: 0, minWidth: '24px', fontSize: '0.85rem' }}
+                      title="Decrease party size"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={maxAvailableSeats}
+                      value={partySize}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 1;
+                        setPartySize(Math.max(1, Math.min(maxAvailableSeats, val)));
+                      }}
+                      style={{
+                        width: '42px',
+                        height: '24px',
+                        textAlign: 'center',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPartySize(prev => Math.min(maxAvailableSeats, prev + 1))}
+                      disabled={partySize >= maxAvailableSeats}
+                      className="btn btn-sm btn-ghost"
+                      style={{ height: '24px', width: '24px', padding: 0, minWidth: '24px', fontSize: '0.85rem' }}
+                      title="Increase party size"
+                    >
+                      +
+                    </button>
+                  </div>
+                  {[1, 2, 3, 4, 6, 8, 10, 12].filter(s => s <= maxAvailableSeats).map((size) => (
                     <button
                       key={size}
                       type="button"
@@ -539,16 +601,19 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                         setIsChangingPartySize(false);
                       }}
                       className={`btn btn-sm ${partySize === size ? 'btn-primary' : 'btn-outline'}`}
-                      style={{ minWidth: '28px', height: '24px', padding: '0 4px', fontSize: '0.75rem' }}
+                      style={{ minWidth: '26px', height: '24px', padding: '0 4px', fontSize: '0.75rem' }}
                     >
                       {size}
                     </button>
                   ))}
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    (max {maxAvailableSeats})
+                  </span>
                   <button
                     type="button"
                     onClick={() => setIsChangingPartySize(false)}
-                    className="btn btn-sm btn-ghost"
-                    style={{ fontSize: '0.75rem', padding: '2px 6px', height: '24px' }}
+                    className="btn btn-sm btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '2px 8px', height: '24px' }}
                   >
                     Done
                   </button>
@@ -558,13 +623,14 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
 
             <button
               type="button"
-              onClick={() => setShowAiSuggestions(true)}
+              onClick={handleGetAiSuggestions}
+              disabled={isFetchingRecs}
               className="btn btn-sm btn-secondary"
               style={{ gap: '6px', fontSize: '0.84rem' }}
               data-testid="get-ai-suggestions-btn"
             >
               <Sparkles size={14} color="#f59e0b" />
-              Get AI Suggestions
+              {isFetchingRecs ? 'Analyzing Seats...' : 'Get AI Suggestions'}
             </button>
           </div>
         </div>
@@ -602,8 +668,50 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                     Change
                   </button>
                 ) : (
-                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                    {[1, 2, 3, 4, 5, 6].map((size) => (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPartySize(prev => Math.max(1, prev - 1))}
+                        disabled={partySize <= 1}
+                        className="btn btn-sm btn-ghost"
+                        style={{ height: '24px', width: '24px', padding: 0, minWidth: '24px', fontSize: '0.85rem' }}
+                        title="Decrease party size"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={maxAvailableSeats}
+                        value={partySize}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 1;
+                          setPartySize(Math.max(1, Math.min(maxAvailableSeats, val)));
+                        }}
+                        style={{
+                          width: '42px',
+                          height: '24px',
+                          textAlign: 'center',
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#ffffff',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPartySize(prev => Math.min(maxAvailableSeats, prev + 1))}
+                        disabled={partySize >= maxAvailableSeats}
+                        className="btn btn-sm btn-ghost"
+                        style={{ height: '24px', width: '24px', padding: 0, minWidth: '24px', fontSize: '0.85rem' }}
+                        title="Increase party size"
+                      >
+                        +
+                      </button>
+                    </div>
+                    {[1, 2, 3, 4, 6, 8, 10, 12].filter(s => s <= maxAvailableSeats).map((size) => (
                       <button
                         key={size}
                         type="button"
@@ -612,16 +720,19 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                           setIsChangingPartySize(false);
                         }}
                         className={`btn btn-sm ${partySize === size ? 'btn-primary' : 'btn-outline'}`}
-                        style={{ minWidth: '28px', height: '24px', padding: '0 4px', fontSize: '0.75rem' }}
+                        style={{ minWidth: '26px', height: '24px', padding: '0 4px', fontSize: '0.75rem' }}
                       >
                         {size}
                       </button>
                     ))}
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      (max {maxAvailableSeats})
+                    </span>
                     <button
                       type="button"
                       onClick={() => setIsChangingPartySize(false)}
-                      className="btn btn-sm btn-ghost"
-                      style={{ fontSize: '0.75rem', padding: '2px 6px', height: '24px' }}
+                      className="btn btn-sm btn-primary"
+                      style={{ fontSize: '0.75rem', padding: '2px 8px', height: '24px' }}
                     >
                       Done
                     </button>
@@ -629,14 +740,39 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowAiSuggestions(false)}
-                className="btn btn-sm btn-ghost"
-                style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}
-              >
-                Hide Suggestions
-              </button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={handleGetAiSuggestions}
+                  disabled={isFetchingRecs}
+                  className="btn btn-sm btn-outline"
+                  style={{ fontSize: '0.78rem', gap: '4px', height: '26px', padding: '2px 8px', color: '#f59e0b', borderColor: 'rgba(245,158,11,0.4)' }}
+                  data-testid="refresh-ai-suggestions-btn"
+                >
+                  <Sparkles size={12} color="#f59e0b" />
+                  {isFetchingRecs ? 'Analyzing...' : 'Refresh Suggestions'}
+                </button>
+                {lastAiAppliedSeatIds !== null && (
+                  <button
+                    type="button"
+                    onClick={handleUndoAiSelection}
+                    className="btn btn-sm btn-outline"
+                    style={{ fontSize: '0.8rem', gap: '6px', borderColor: 'rgba(245,158,11,0.5)', color: '#fbbf24' }}
+                    title="Revert to the seat selection you had before applying this AI recommendation"
+                    data-testid="undo-ai-selection-btn"
+                  >
+                    ↩ Undo AI Selection
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowAiSuggestions(false)}
+                  className="btn btn-sm btn-ghost"
+                  style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                >
+                  Hide Suggestions
+                </button>
+              </div>
             </div>
           </div>
 
@@ -669,6 +805,8 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                 return (
                   <div
                     key={idx}
+                    onMouseEnter={() => setHighlightedSeatIds(opt.seatIds)}
+                    onMouseLeave={() => setHighlightedSeatIds([])}
                     style={{
                       padding: '14px 18px',
                       background: 'var(--bg-elevated)',
@@ -705,15 +843,29 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total: </span>
                         <strong style={{ color: '#ffffff', fontSize: '0.95rem' }}>₹{optPrice}</strong>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleApplyRecommendation(opt.seatIds)}
-                        className={`btn btn-sm ${isCurrentlySelected ? 'btn-outline' : 'btn-primary'}`}
-                        style={{ fontSize: '0.8rem', padding: '6px 14px', fontWeight: 700 }}
-                        data-testid={`use-seats-btn-${idx}`}
-                      >
-                        {isCurrentlySelected ? 'Selected' : 'Use These Seats'}
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {isCurrentlySelected && lastAiAppliedSeatIds !== null && (
+                          <button
+                            type="button"
+                            onClick={handleUndoAiSelection}
+                            className="btn btn-sm btn-ghost"
+                            style={{ fontSize: '0.75rem', color: '#fbbf24', padding: '4px 10px' }}
+                            title="Undo: revert to your previous manual seat selection"
+                            data-testid={`undo-ai-btn-${idx}`}
+                          >
+                            ↩ Undo
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleApplyRecommendation(opt.seatIds)}
+                          className={`btn btn-sm ${isCurrentlySelected ? 'btn-outline' : 'btn-primary'}`}
+                          style={{ fontSize: '0.8rem', padding: '6px 14px', fontWeight: 700 }}
+                          data-testid={`use-seats-btn-${idx}`}
+                        >
+                          {isCurrentlySelected ? 'Selected ✓' : 'Use These Seats'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -855,6 +1007,7 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
           <SeatGrid
             seats={availability.seats}
             selectedSeatIds={selectedSeatIds}
+            highlightedSeatIds={highlightedSeatIds}
             onToggleSeat={handleToggleSeat}
             isInteractive={!holdToken}
             isCustomerSelection={true}
@@ -912,16 +1065,27 @@ export const SeatAvailabilityView: React.FC<SeatAvailabilityViewProps> = ({
                 Resume Checkout ({formatTimer(holdSecondsLeft)})
               </button>
             ) : (
-              <button
-                type="button"
-                disabled={isHolding || selectedSeatIds.length === 0}
-                onClick={handleHoldSeats}
-                className="btn btn-primary"
-                style={{ padding: '12px 28px', fontSize: '1rem', fontWeight: 800, gap: '8px' }}
-              >
-                <ShieldCheck size={18} />
-                {isHolding ? 'Holding Seats...' : 'Hold Seats & Proceed to Pay'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSeatIds([])}
+                  className="btn btn-outline"
+                  style={{ padding: '12px 20px', fontSize: '0.9rem', fontWeight: 600 }}
+                  data-testid="clear-selection-btn"
+                >
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  disabled={isHolding || selectedSeatIds.length === 0}
+                  onClick={handleHoldSeats}
+                  className="btn btn-primary"
+                  style={{ padding: '12px 28px', fontSize: '1rem', fontWeight: 800, gap: '8px' }}
+                >
+                  <ShieldCheck size={18} />
+                  {isHolding ? 'Holding Seats...' : 'Hold Seats & Proceed to Pay'}
+                </button>
+              </>
             )}
           </div>
         </div>

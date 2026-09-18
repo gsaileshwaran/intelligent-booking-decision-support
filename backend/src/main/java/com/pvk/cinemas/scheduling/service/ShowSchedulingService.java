@@ -34,12 +34,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
 public class ShowSchedulingService {
+
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("hh:mm a").withZone(IST_ZONE);
 
     private final ShowRepository showRepository;
     private final ShowSeatRepository showSeatRepository;
@@ -196,7 +204,7 @@ public class ShowSchedulingService {
     }
 
     @Transactional(readOnly = true)
-    public List<ShowResponse> getShowsForTheatre(Long theatreId) {
+    public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date) {
         if (theatreId == null) {
             return java.util.Collections.emptyList();
         }
@@ -211,31 +219,56 @@ public class ShowSchedulingService {
             return java.util.Collections.emptyList();
         }
         return showRepository.findByScreenCapabilityIdIn(capabilityIds).stream()
+                .filter(s -> {
+                    if (date == null) return true;
+                    if (s.getStartAt() == null) return false;
+                    return s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date);
+                })
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public List<ShowResponse> getShowsForTheatre(Integer theatreId) {
-        return theatreId != null ? getShowsForTheatre(theatreId.longValue()) : java.util.Collections.emptyList();
+    public List<ShowResponse> getShowsForTheatre(Long theatreId) {
+        return getShowsForTheatre(theatreId, (LocalDate) null);
     }
 
     @Transactional(readOnly = true)
-    public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId) {
+    public List<ShowResponse> getShowsForTheatre(Integer theatreId, LocalDate date) {
+        return theatreId != null ? getShowsForTheatre(theatreId.longValue(), date) : java.util.Collections.emptyList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ShowResponse> getShowsForTheatre(Integer theatreId) {
+        return getShowsForTheatre(theatreId, (LocalDate) null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId, LocalDate date) {
         List<MovieLanguage> mls = movieLanguageRepository.findByMovieId(movieId);
         List<Long> mlIds = mls.stream().map(MovieLanguage::getMovieLanguageId).toList();
         if (mlIds.isEmpty()) {
             return java.util.Collections.emptyList();
         }
         return showRepository.findByMovieLanguageIdIn(mlIds).stream()
+                .filter(s -> {
+                    if (date == null) return true;
+                    if (s.getStartAt() == null) return false;
+                    return s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date);
+                })
                 .map(this::mapToResponse)
                 .filter(resp -> cityId == null || (resp.getCityId() != null && resp.getCityId().equals(cityId.longValue())))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
+    public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId) {
+        return getShowsForMovie(movieId, cityId, null);
+    }
+
+    @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForMovie(Long movieId) {
-        return getShowsForMovie(movieId, null);
+        return getShowsForMovie(movieId, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -260,7 +293,10 @@ public class ShowSchedulingService {
                 resp.setMovieTitle(m.getTitle());
                 resp.setPosterUrl(m.getPosterUrl());
             });
-            languageRepository.findById(ml.getLanguageId()).ifPresent(l -> resp.setLanguageName(l.getLanguageName()));
+            languageRepository.findById(ml.getLanguageId()).ifPresent(l -> {
+                resp.setLanguageName(l.getLanguageName());
+                resp.setLanguage(l.getLanguageName());
+            });
         });
 
         screenCapabilityRepository.findById(s.getScreenCapabilityId()).ifPresent(sc -> {
@@ -289,6 +325,7 @@ public class ShowSchedulingService {
         resp.setTotalSeats(showSeats.size());
         int availCount = (int) showSeats.stream().filter(ss -> "AVAILABLE".equalsIgnoreCase(ss.getAvailabilityStatus())).count();
         resp.setAvailableSeats(availCount);
+        resp.setAvailableSeatCount(availCount);
 
         // Price calculation
         if (seatPricingService != null) {
@@ -302,6 +339,13 @@ public class ShowSchedulingService {
             }
         } else {
             resp.setMinPrice(new java.math.BigDecimal("160.00"));
+        }
+        resp.setStartingPrice(resp.getMinPrice());
+
+        if (s.getStartAt() != null) {
+            ZonedDateTime zdt = s.getStartAt().atZone(IST_ZONE);
+            resp.setShowDate(zdt.toLocalDate().toString());
+            resp.setStartTime(TIME_FORMATTER.format(s.getStartAt()).toUpperCase(Locale.ENGLISH));
         }
 
         return resp;

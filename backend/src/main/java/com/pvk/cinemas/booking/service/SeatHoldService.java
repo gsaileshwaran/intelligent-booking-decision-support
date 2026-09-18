@@ -65,8 +65,23 @@ public class SeatHoldService {
             throw new ResourceNotFoundException("Show not found with ID: " + showId);
         }
 
+        // Prevent duplicate seat IDs in the selection
+        Set<Long> uniqueSeatIds = new HashSet<>(seatIds);
+        if (uniqueSeatIds.size() != seatIds.size()) {
+            throw new IllegalArgumentException("Duplicate seat selections are not permitted");
+        }
+
         // 1. Release expired holds for this show first
         releaseExpiredHoldsForShow(showId);
+
+        // Verify requested count does not exceed currently available capacity for this show
+        List<ShowSeat> allShowSeats = showSeatRepository.findByIdShowId(showId);
+        long availableCapacity = allShowSeats.stream()
+                .filter(ss -> "AVAILABLE".equalsIgnoreCase(ss.getAvailabilityStatus()))
+                .count();
+        if (seatIds.size() > availableCapacity) {
+            throw new IllegalArgumentException(String.format("Requested %d seats exceeds currently available capacity (%d seats) for show %d.", seatIds.size(), availableCapacity, showId));
+        }
 
         // 2. Acquire pessimistic write lock on target show seats
         List<ShowSeat> lockedShowSeats = showSeatRepository.findByIdShowIdAndIdSeatIdInForUpdate(showId, seatIds);

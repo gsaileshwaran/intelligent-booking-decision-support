@@ -20,6 +20,11 @@ export interface Show {
   totalSeats?: number;
   minPrice?: number;
   posterUrl?: string;
+  showDate?: string;
+  startTime?: string;
+  availableSeatCount?: number;
+  startingPrice?: number;
+  language?: string;
 }
 
 export interface ShowRequest {

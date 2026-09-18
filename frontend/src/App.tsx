@@ -128,12 +128,12 @@ function routeToHash(view: string, param?: any): string {
   switch (view) {
     case 'home': return '#/home';
     case 'movies': return '#/movies';
-    case 'movie-details': return `#/movie/${param || 1}`;
+    case 'movie-details': return `#/movie/${(typeof param === 'object' && param !== null) ? (param.movieId || 1) : (param || 1)}`;
     case 'search': return param ? `#/search?q=${encodeURIComponent(String(param))}` : '#/search';
     case 'theatres': return '#/theatres';
-    case 'theatre-details': return `#/theatre/${param || 1}`;
-    case 'show-details': return `#/show/${param || 1}`;
-    case 'show-seats': return `#/seats/${param || 1}`;
+    case 'theatre-details': return `#/theatre/${(typeof param === 'object' && param !== null) ? (param.theatreId || 1) : (param || 1)}`;
+    case 'show-details': return `#/show/${(typeof param === 'object' && param !== null) ? (param.showId || 1) : (param || 1)}`;
+    case 'show-seats': return `#/seats/${(typeof param === 'object' && param !== null) ? (param.showId || 1) : (param || 1)}`;
     case 'login': return '#/login';
     case 'profile': return '#/profile';
     case 'booking-confirmation': return `#/booking-confirmation/${param || ''}`;
@@ -176,7 +176,15 @@ export function AppContent() {
     const handleHashChange = () => {
       const { view, param } = hashToRoute(window.location.hash);
       setCurrentView(view);
-      setViewParam(param);
+      setViewParam((prev: any) => {
+        if (view === 'show-seats' && typeof prev === 'object' && prev !== null && prev.showId === param) {
+          return prev;
+        }
+        if (view === 'movie-details' && typeof prev === 'object' && prev !== null && prev.movieId === param) {
+          return prev;
+        }
+        return param;
+      });
     };
 
     if (!window.location.hash) {
@@ -202,8 +210,12 @@ export function AppContent() {
         return <HomeView onNavigate={navigate} />;
       case 'movies':
         return <MovieListingView onNavigate={navigate} />;
-      case 'movie-details':
-        return <MovieDetailsView movieId={Number(viewParam) || 1} onNavigate={navigate} />;
+      case 'movie-details': {
+        const movieId = typeof viewParam === 'object' && viewParam !== null ? Number(viewParam.movieId) || 1 : (Number(viewParam) || 1);
+        const initialTheatreId = typeof viewParam === 'object' && viewParam !== null ? viewParam.theatreId : undefined;
+        const initialDate = typeof viewParam === 'object' && viewParam !== null ? viewParam.date : undefined;
+        return <MovieDetailsView movieId={movieId} initialTheatreId={initialTheatreId} initialDate={initialDate} onNavigate={navigate} />;
+      }
       case 'search':
         return <SearchResultsView initialQuery={String(viewParam || '')} onNavigate={navigate} />;
       case 'theatres':

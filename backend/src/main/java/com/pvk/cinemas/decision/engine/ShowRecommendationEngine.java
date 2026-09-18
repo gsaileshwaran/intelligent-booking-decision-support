@@ -11,6 +11,7 @@ import com.pvk.cinemas.catalogue.repository.LanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieLanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieRepository;
 import com.pvk.cinemas.catalogue.repository.PresentationFormatRepository;
+import com.pvk.cinemas.decision.dto.SeatFitResult;
 import com.pvk.cinemas.decision.dto.ShowCandidateDTO;
 import com.pvk.cinemas.decision.dto.ShowRecommendationRequest;
 import com.pvk.cinemas.decision.dto.ShowRecommendationResponse;
@@ -38,27 +39,8 @@ import java.util.stream.Collectors;
 
 /**
  * Show Recommendation Engine — PVK Cinemas Decision Support.
- *
- * Hard Constraint Pipeline (applied BEFORE ranking — violators are excluded, not penalised):
- *   1. City scope (authoritative DB relationship: theatre.city_id)
- *   2. Date range (dateFrom / dateTo — show date must be within range)
- *   3. Language (languageCode — show's movie_language must match; hard-excluded if not)
- *   4. Format (formatPreference — hard-excluded if customer selected a specific format)
- *   5. Party size (available seats >= partySize)
- *   6. Budget (partySize × ticketPrice <= budgetMaxTotal)
- *
- * Soft Preference + Ranking:
- *   Surviving candidates are ranked by a weighted composite score:
- *   - BALANCED: Seat Fit = 40%, Price/Value = 30%, Time Fit = 30%
- *   - BEST_PRICE: Price/Value = 55%, Seat Fit = 25%, Time Fit = 20%
- *   - BEST_SEATS: Seat Fit = 55%, Price/Value = 20%, Time Fit = 25%
- *   - BEST_TIME: Time Fit = 55%, Seat Fit = 25%, Price/Value = 20%
- *
- * Seat Fit Scoring:
- *   Queries actual Seat records from the database.
- *   Groups available seats by row_label, sorts by numeric seat_number,
- *   and identifies the longest contiguous run of adjacent seats.
- *   Scores optical/acoustic sweet-spot quality via SeatScoringEngine.
+ * Multi-criteria decision ranking across candidate shows for a movie.
+ * Unifies show-level ranking with authoritative group seating feasibility.
  */
 @Component
 public class ShowRecommendationEngine {
@@ -81,6 +63,7 @@ public class ShowRecommendationEngine {
     private final SeatHoldService seatHoldService;
     private final SeatScoringEngine seatScoringEngine;
     private final com.pvk.cinemas.booking.service.SeatPricingService seatPricingService;
+    private final SeatGroupPlanner seatGroupPlanner;
 
     public ShowRecommendationEngine(ShowRepository showRepository,
                                     ShowSeatRepository showSeatRepository,
@@ -95,7 +78,8 @@ public class ShowRecommendationEngine {
                                     CityRepository cityRepository,
                                     SeatHoldService seatHoldService,
                                     SeatScoringEngine seatScoringEngine,
-                                    com.pvk.cinemas.booking.service.SeatPricingService seatPricingService) {
+                                    com.pvk.cinemas.booking.service.SeatPricingService seatPricingService,
+                                    SeatGroupPlanner seatGroupPlanner) {
         this.showRepository = showRepository;
         this.showSeatRepository = showSeatRepository;
         this.movieRepository = movieRepository;
@@ -110,6 +94,7 @@ public class ShowRecommendationEngine {
         this.seatHoldService = seatHoldService;
         this.seatScoringEngine = seatScoringEngine;
         this.seatPricingService = seatPricingService;
+        this.seatGroupPlanner = seatGroupPlanner;
     }
 
     public ShowRecommendationResponse recommendShows(Long movieId, ShowRecommendationRequest request) {
@@ -169,6 +154,13 @@ public class ShowRecommendationEngine {
                 .filter(s -> "SCHEDULED".equalsIgnoreCase(s.getShowStatus())
                         || "OPEN".equalsIgnoreCase(s.getShowStatus()))
                 .toList();
+
+        // Enforce strict uniqueness by showId: One Show = One Identity
+        Map<Long, Show> distinctShowsMap = new LinkedHashMap<>();
+        for (Show s : candidateShows) {
+            distinctShowsMap.putIfAbsent(s.getShowId(), s);
+        }
+        candidateShows = new ArrayList<>(distinctShowsMap.values());
 
         // =====================================================================
         // HARD CONSTRAINT 1: Date Range Filter
@@ -315,18 +307,34 @@ public class ShowRecommendationEngine {
 
             double availabilityRatio = totalSeats > 0 ? (double) availableCount / totalSeats : 0.0;
 
-            // REAL SEAT FIT SCORING: Evaluate actual contiguous adjacent seats
-            List<Seat> allScreenSeats = screenSeatsCache.computeIfAbsent(screen.getScreenId().longValue(),
-                    id -> seatRepository.findByScreenId(id));
-            SeatFitInfo seatFitInfo = evaluateSeatFit(availableSeats, allScreenSeats, request.getPartySize());
+            // Authoritative Shared Group Seating Evaluation
+            List<Seat> allScreenSeats = seatRepository.findAllById(showSeats.stream().map(ss -> ss.getId().getSeatId()).toList());
+            if (allScreenSeats == null || allScreenSeats.isEmpty()) {
+                allScreenSeats = seatRepository.findByScreenId(screen.getScreenId());
+            }
+            SeatFitResult seatFit = seatGroupPlanner.planBestGroup(
+                    show.getShowId(), showSeats, allScreenSeats, request.getPartySize(), request.getPriority());
+
+            // Exact group price matching (Requirement 27)
+            if (seatFit != null && seatFit.getTotalPrice() != null && seatFit.getTotalPrice().compareTo(BigDecimal.ZERO) > 0) {
+                totalCost = seatFit.getTotalPrice();
+                ticketPrice = totalCost.divide(BigDecimal.valueOf(request.getPartySize()), 2, java.math.RoundingMode.HALF_UP);
+            }
 
             ShowCandidateDTO candidate = evaluateCandidate(
                     show, theatre, screen, formatName,
                     totalSeats, availableCount, availabilityRatio,
                     ticketPrice, totalCost, budgetMaxTotal,
-                    seatFitInfo, resolvedLanguageName, request);
+                    seatFit, resolvedLanguageName, request);
             candidates.add(candidate);
         }
+
+        // Strict Requirement: ONE SHOW = ONE CARD (Authoritative showId identity)
+        Map<Long, ShowCandidateDTO> uniqueCandidateMap = new LinkedHashMap<>();
+        for (ShowCandidateDTO cand : candidates) {
+            uniqueCandidateMap.putIfAbsent(cand.getShowId(), cand);
+        }
+        candidates = new ArrayList<>(uniqueCandidateMap.values());
 
         // Sort by matchScore descending, then availableSeats descending as tiebreaker
         candidates.sort(Comparator.comparingInt(ShowCandidateDTO::getMatchScore).reversed()
@@ -369,180 +377,11 @@ public class ShowRecommendationEngine {
         return new BigDecimal("180.00");
     }
 
-    /**
-     * Evaluates actual seat allocation quality using database Seat records.
-     * Groups available seats by row_label, orders by integer seat_number,
-     * and calculates contiguous block size and acoustic/optical quality.
-     */
-    static class SeatFitInfo {
-        int maxContiguousBlock = 0;
-        String bestRow = null;
-        List<String> bestSeatLabels = new ArrayList<>();
-        List<Long> bestSeatIds = new ArrayList<>();
-        int seatFitScore = 50;
-        boolean allTogether = false;
-    }
-
-    private SeatFitInfo evaluateSeatFit(List<ShowSeat> availableSeats, List<Seat> allScreenSeats, int partySize) {
-        SeatFitInfo info = new SeatFitInfo();
-        if (availableSeats == null || availableSeats.isEmpty() || partySize <= 0) {
-            return info;
-        }
-
-        Set<Long> availIds = availableSeats.stream()
-                .map(ss -> ss.getId().getSeatId())
-                .collect(Collectors.toSet());
-
-        // Filter: must be in available show-seat set AND physically ACTIVE (not maintenance-blocked)
-        List<Seat> seats = (allScreenSeats != null && !allScreenSeats.isEmpty())
-                ? allScreenSeats.stream()
-                    .filter(s -> availIds.contains(s.getSeatId()))
-                    .filter(s -> "ACTIVE".equalsIgnoreCase(s.getStatus()))
-                    .toList()
-                : seatRepository.findAllById(availIds).stream()
-                    .filter(s -> "ACTIVE".equalsIgnoreCase(s.getStatus()))
-                    .toList();
-
-        if (seats == null || seats.isEmpty()) {
-            info.maxContiguousBlock = availableSeats.size();
-            info.seatFitScore = Math.min(100, Math.max(40, (int) Math.round(((double) availableSeats.size() / partySize) * 100)));
-            return info;
-        }
-
-        Map<String, List<Seat>> seatsByRow = seats.stream()
-                .filter(s -> s.getRowLabel() != null)
-                .collect(Collectors.groupingBy(Seat::getRowLabel));
-
-        int globalMaxContiguous = 0;
-        String topRow = null;
-        List<String> topLabels = new ArrayList<>();
-        List<Long> topIds = new ArrayList<>();
-        int topQualityScore = 70;
-
-        for (Map.Entry<String, List<Seat>> entry : seatsByRow.entrySet()) {
-            String row = entry.getKey();
-            List<Seat> rowSeats = entry.getValue();
-
-            rowSeats.sort(Comparator.comparingInt(s -> {
-                try {
-                    return Integer.parseInt(s.getSeatNumber().replaceAll("[^0-9]", ""));
-                } catch (Exception e) {
-                    return 0;
-                }
-            }));
-
-            int currentRun = 0;
-            List<Seat> currentRunSeats = new ArrayList<>();
-            int prevNum = -999;
-            Seat prevSeat = null;
-
-            for (Seat seat : rowSeats) {
-                int seatNum;
-                try {
-                    seatNum = Integer.parseInt(seat.getSeatNumber().replaceAll("[^0-9]", ""));
-                } catch (Exception e) {
-                    seatNum = prevNum + 2;
-                }
-
-                boolean aisleBreak = (prevSeat != null && prevSeat.getAisleAfter() != null && prevSeat.getAisleAfter());
-
-                if (seatNum == prevNum + 1 && !aisleBreak) {
-                    currentRun++;
-                    currentRunSeats.add(seat);
-                } else {
-                    currentRun = 1;
-                    currentRunSeats = new ArrayList<>();
-                    currentRunSeats.add(seat);
-                }
-                prevNum = seatNum;
-                prevSeat = seat;
-
-                if (currentRun > globalMaxContiguous) {
-                    globalMaxContiguous = currentRun;
-                    topRow = row;
-                    topLabels = currentRunSeats.stream()
-                            .map(s -> s.getRowLabel() + s.getSeatNumber())
-                            .toList();
-                    topIds = currentRunSeats.stream()
-                            .map(Seat::getSeatId)
-                            .toList();
-                }
-
-                if (currentRun >= partySize) {
-                    List<Seat> partySeats = currentRunSeats.subList(currentRun - partySize, currentRun);
-                    int quality = (int) partySeats.stream()
-                            .mapToInt(s -> {
-                                if (seatScoringEngine != null) {
-                                    return seatScoringEngine.scoreSeat(s).getScore();
-                                }
-                                return 85;
-                            })
-                            .average()
-                            .orElse(80);
-
-                    if (quality > topQualityScore || !info.allTogether) {
-                        topQualityScore = quality;
-                        topRow = row;
-                        topLabels = partySeats.stream()
-                                .map(s -> s.getRowLabel() + s.getSeatNumber())
-                                .toList();
-                        topIds = partySeats.stream()
-                                .map(Seat::getSeatId)
-                                .toList();
-                        info.allTogether = true;
-                    }
-                }
-            }
-        }
-
-        // If contiguous block of full partySize was not found, assemble best cluster of partySize seats
-        if (topIds.size() < partySize && seats.size() >= partySize) {
-            List<Seat> candidatePool = new ArrayList<>(seats);
-            candidatePool.sort(Comparator.comparingInt((Seat s) -> {
-                if (seatScoringEngine != null) {
-                    return seatScoringEngine.scoreSeat(s).getScore();
-                }
-                return 80;
-            }).reversed());
-
-            Set<Long> collected = new LinkedHashSet<>(topIds);
-            for (Seat s : candidatePool) {
-                if (collected.size() >= partySize) break;
-                collected.add(s.getSeatId());
-            }
-            topIds = new ArrayList<>(collected);
-            Map<Long, Seat> byId = seats.stream().collect(Collectors.toMap(Seat::getSeatId, s -> s));
-            topLabels = topIds.stream()
-                    .map(id -> {
-                        Seat s = byId.get(id);
-                        return s != null ? (s.getRowLabel() + s.getSeatNumber()) : String.valueOf(id);
-                    })
-                    .toList();
-            topRow = "Mixed";
-        }
-
-        info.maxContiguousBlock = globalMaxContiguous;
-        info.bestRow = topRow;
-        info.bestSeatLabels = topLabels;
-        info.bestSeatIds = topIds;
-
-        if (globalMaxContiguous >= partySize) {
-            info.allTogether = true;
-            info.seatFitScore = Math.min(100, Math.max(70, topQualityScore));
-        } else {
-            info.allTogether = false;
-            double ratio = (double) globalMaxContiguous / partySize;
-            info.seatFitScore = Math.max(30, (int) Math.round(ratio * 65));
-        }
-
-        return info;
-    }
-
     private ShowCandidateDTO evaluateCandidate(Show show, Theatre theatre, Screen screen,
                                                String formatName, int totalSeats, int availableSeats,
                                                double availabilityRatio, BigDecimal ticketPrice,
                                                BigDecimal totalCost, BigDecimal budgetMaxTotal,
-                                               SeatFitInfo seatFitInfo,
+                                               SeatFitResult seatFit,
                                                String resolvedLanguageName,
                                                ShowRecommendationRequest req) {
         ShowCandidateDTO dto = new ShowCandidateDTO();
@@ -580,22 +419,27 @@ public class ShowRecommendationEngine {
             reasons.add("Format: " + formatName);
         }
 
-        // ---- SEAT FIT SCORE [0-100] ----
-        int seatFitScore = seatFitInfo.seatFitScore;
-        if (seatFitInfo.allTogether) {
-            if (seatFitInfo.bestSeatIds != null && !seatFitInfo.bestSeatIds.isEmpty()) {
-                dto.setRecommendedSeatIds(seatFitInfo.bestSeatIds);
-                dto.setRecommendedSeatLabels(seatFitInfo.bestSeatLabels);
-            }
-            if (seatFitInfo.bestRow != null && !seatFitInfo.bestSeatLabels.isEmpty()) {
-                reasons.add(String.format("%d adjacent seats together in Row %s (%s)",
-                        req.getPartySize(), seatFitInfo.bestRow, String.join(", ", seatFitInfo.bestSeatLabels)));
+        // ---- SEAT FIT DETAILS & SCORE [35-100] ----
+        int seatFitScore = seatFit.getGroupScore();
+        dto.setRecommendedSeatIds(seatFit.getSeatIds());
+        dto.setRecommendedSeatLabels(seatFit.getSeatLabels());
+        dto.setSeatFitDescription(seatFit.getSplitDescription());
+        dto.setViewingQualityScore(seatFitScore);
+        dto.setSeatingTradeoff(seatFit.getSeatingTradeoff());
+
+        if (seatFit.isAllTogether()) {
+            if (seatFit.getBestRow() != null) {
+                reasons.add(String.format("Has %d adjacent seats together in Row %s (%s)",
+                        req.getPartySize(), seatFit.getBestRow(), seatFit.getRationale()));
             } else {
-                reasons.add(String.format("%d adjacent seats available together in a single row", req.getPartySize()));
+                reasons.add(seatFit.getRationale());
             }
         } else {
-            tradeOffs.add(String.format("Seats not all together: largest adjacent block is %d seats in Row %s (need %d)",
-                    seatFitInfo.maxContiguousBlock, seatFitInfo.bestRow != null ? seatFitInfo.bestRow : "?", req.getPartySize()));
+            reasons.add(String.format("Seating arrangement: %s (viewing quality: %d/100)",
+                    seatFit.getSplitDescription(), seatFitScore));
+            if (seatFit.getSeatingTradeoff() != null) {
+                tradeOffs.add(seatFit.getSeatingTradeoff());
+            }
         }
 
         // ---- TIME FIT SCORE [0-100] ----

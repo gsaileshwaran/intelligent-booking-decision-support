@@ -11,6 +11,9 @@ dist/
 **/dist/
 dist-ssr/
 out/
+.vite/
+**/test-results/
+**/playwright-report/
 
 # Node & Package Managers
 node_modules/

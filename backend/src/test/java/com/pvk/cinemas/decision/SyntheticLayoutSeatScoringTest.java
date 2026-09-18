@@ -7,6 +7,7 @@ import com.pvk.cinemas.decision.dto.RecommendedBlock;
 import com.pvk.cinemas.decision.dto.SeatRecommendationRequest;
 import com.pvk.cinemas.decision.dto.SeatRecommendationResponse;
 import com.pvk.cinemas.decision.dto.SeatScoreDTO;
+import com.pvk.cinemas.decision.engine.SeatGroupPlanner;
 import com.pvk.cinemas.decision.engine.SeatRecommendationEngine;
 import com.pvk.cinemas.decision.engine.SeatScoringEngine;
 import com.pvk.cinemas.infrastructure.model.Seat;
@@ -42,7 +43,8 @@ class SyntheticLayoutSeatScoringTest {
         seatPricingService = Mockito.mock(SeatPricingService.class);
 
         scoringEngine = new SeatScoringEngine(seatRepository, seatTypeRepository, null);
-        recommendationEngine = new SeatRecommendationEngine(showSeatRepository, seatRepository, scoringEngine, seatPricingService);
+        SeatGroupPlanner seatGroupPlanner = new SeatGroupPlanner(scoringEngine, seatPricingService);
+        recommendationEngine = new SeatRecommendationEngine(showSeatRepository, seatRepository, seatGroupPlanner);
 
         when(seatTypeRepository.findById(1L)).thenReturn(Optional.of(new SeatType(1L, "STANDARD", "Standard", "Standard")));
         when(seatTypeRepository.findById(2L)).thenReturn(Optional.of(new SeatType(2L, "PREMIUM", "Premium", "Premium")));

@@ -160,6 +160,13 @@ export interface ShowCandidate {
   tradeOffs: string[];
   recommendedSeatIds?: number[];
   recommendedSeatLabels?: string[];
+  alternativeSeatLabels?: string[];
+  seatFitDescription?: string;
+  viewingQualityScore?: number;
+  seatingTradeoff?: string;
+  startTime?: string;
+  availableSeatCount?: number;
+  startingPrice?: number | string;
 }
 
 /** Alias — canonical name used in MovieDetailsView */

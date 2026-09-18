@@ -268,7 +268,7 @@ export const TheatreDetailsView: React.FC<TheatreDetailsViewProps> = ({ theatreI
                   </div>
 
                   <button
-                    onClick={() => onNavigate('movie-details', group.movieId)}
+                    onClick={() => onNavigate('movie-details', { movieId: group.movieId, theatreId, date: selectedDate })}
                     className="btn btn-sm btn-outline"
                   >
                     Movie Details

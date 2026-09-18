@@ -17,25 +17,13 @@ public class AdaptiveGuidanceEngine {
     }
 
     public SeatRecommendationResponse adaptForParty(Long showId, int partySize, String customerPreference) {
-        String adaptivePref = customerPreference != null ? customerPreference : "BEST_VIEW";
-
-        if (partySize == 1) {
-            // Solo viewer: focus on optimal visual sweet spot
-            adaptivePref = "BEST_VIEW";
-        } else if (partySize == 2) {
-            // Couple: focus on acoustic symmetry and sweet spot
-            adaptivePref = "BALANCED";
-        } else if (partySize >= 4) {
-            // Large group: focus on contiguous layout
-            adaptivePref = "BEST_VIEW";
-        }
+        String adaptivePref = (customerPreference != null && !customerPreference.isBlank()) ? customerPreference : "BEST_VIEW";
 
         SeatRecommendationResponse response = seatRecommendationEngine.recommend(
                 showId,
                 new SeatRecommendationRequest(partySize, adaptivePref)
         );
 
-        // Customize descriptions based on party size without overwriting physical/contiguity facts
         for (RecommendedBlock block : response.getRecommendations()) {
             boolean isContiguous = block.getRationale() != null && block.getRationale().startsWith("Contiguous");
             if (partySize == 1) {
@@ -46,11 +34,11 @@ public class AdaptiveGuidanceEngine {
                 } else {
                     block.setRationale("Couple seating: 2 nearby seats in the preferred viewing area.");
                 }
-            } else if (partySize >= 4) {
+            } else if (block.getRationale() == null || block.getRationale().isEmpty()) {
                 if (isContiguous) {
                     block.setRationale(String.format("Group seating: %d contiguous seats together with easy row entry.", partySize));
                 } else {
-                    block.setRationale(String.format("No single-row contiguous block of %d is currently available. Alternative group seating: %d seats arranged in close proximity.", partySize, partySize));
+                    block.setRationale(String.format("No single-row contiguous block of %d is currently available. Alternative group seating (Paired group): %d seats arranged in close proximity.", partySize, partySize));
                     block.setTitle("Alternative Group Seating");
                     block.setCategory("SPLIT_GROUP");
                 }

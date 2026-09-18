@@ -14,6 +14,8 @@ import { DisplayOnlyBanner } from '../../components/common/DisplayOnlyBanner';
 
 interface MovieDetailsViewProps {
   movieId: number;
+  initialTheatreId?: number;
+  initialDate?: string;
   onNavigate: (view: string, param?: any) => void;
 }
 
@@ -58,13 +60,76 @@ function getISODate(offsetDays = 0): string {
   return d.toISOString().slice(0, 10);
 }
 
-export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onNavigate }) => {
+export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
+  movieId,
+  initialTheatreId,
+  initialDate,
+  onNavigate,
+}) => {
   const { selectedCityId } = useAuth();
 
   const [movie, setMovie] = useState<Movie | null>(null);
   const [shows, setShows] = useState<Show[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Multiplex selection
+  const [selectedTheatreId, setSelectedTheatreId] = useState<number | null>(initialTheatreId ?? null);
+
+  // Available schedule dates derived from actual shows
+  const availableDates = useMemo(() => {
+    const set = new Set<string>();
+    shows.forEach((s) => {
+      if (s.startAt) {
+        set.add(s.startAt.slice(0, 10));
+      }
+    });
+    return Array.from(set).sort();
+  }, [shows]);
+
+  const [selectedDate, setSelectedDate] = useState<string>(initialDate || '');
+
+  useEffect(() => {
+    if (availableDates.length > 0 && (!selectedDate || !availableDates.includes(selectedDate))) {
+      setSelectedDate(initialDate && availableDates.includes(initialDate) ? initialDate : availableDates[0]);
+    }
+  }, [availableDates, selectedDate, initialDate]);
+
+  // Available multiplexes derived from shows
+  const availableTheatres = useMemo(() => {
+    const map = new Map<number, string>();
+    shows.forEach((s) => {
+      if (s.theatreId && s.theatreName) {
+        map.set(s.theatreId, s.theatreName);
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [shows]);
+
+  const selectedTheatreName = useMemo(() => {
+    if (selectedTheatreId == null) return null;
+    return availableTheatres.find((t) => t.id === selectedTheatreId)?.name || null;
+  }, [selectedTheatreId, availableTheatres]);
+
+  // Date formatting helpers
+  const formatDateLabel = (dateStr: string) => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+    const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' });
+    const dayNum = dateObj.getDate();
+
+    if (dateStr === todayStr) {
+      return { prefix: 'Today', sub: `${dayNum} ${monthName}` };
+    }
+    return { prefix: dayName, sub: `${dayNum} ${monthName}` };
+  };
+
+  const formatFullDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    return dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  };
 
   // Decision engine state
   const [showRec, setShowRec] = useState<ShowRecommendationResponse | null>(null);
@@ -79,9 +144,17 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
   const [languageCode, setLanguageCode] = useState('');
   const [formatFilter, setFormatFilter] = useState('ALL');
   const [timeFilter, setTimeFilter] = useState('ALL');
-  const [dateFrom, setDateFrom] = useState(getISODate(0));
-  const [dateTo, setDateTo] = useState(getISODate(7));
+  const [dateFrom, setDateFrom] = useState(initialDate || getISODate(0));
+  const [dateTo, setDateTo] = useState(initialDate || getISODate(7));
   const [budgetTotal, setBudgetTotal] = useState('');
+
+  // Sync dateFrom and dateTo when active calendar date changes
+  useEffect(() => {
+    if (selectedDate) {
+      setDateFrom(selectedDate);
+      setDateTo(selectedDate);
+    }
+  }, [selectedDate]);
 
   // Simple showtimes panel filter (for the manual browse list below the AI panel)
   const [browseFormat, setBrowseFormat] = useState('ALL');
@@ -115,6 +188,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
     try {
       const params: any = {
         cityId: selectedCityId || undefined,
+        theatreId: selectedTheatreId || undefined,
         partySize,
         priority,
       };
@@ -132,14 +206,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
     } finally {
       setRecLoading(false);
     }
-  }, [movieId, selectedCityId, priority, partySize, languageCode, formatFilter, timeFilter, dateFrom, dateTo, budgetTotal]);
-
-  // Auto-run on mount with defaults
-  useEffect(() => {
-    if (!loading && movie) {
-      runDecisionEngine();
-    }
-  }, [loading, movie]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [movieId, selectedCityId, selectedTheatreId, priority, partySize, languageCode, formatFilter, timeFilter, dateFrom, dateTo, budgetTotal]);
 
   const trackFilterChange = () => {
     const count = filterChangeCount + 1;
@@ -151,12 +218,18 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
     }
   };
 
-  // Browse-mode grouping (not AI)
-  const theatreGroups: TheatreGroup[] = useMemo(() => {
-    let filtered = selectedCityId ? shows.filter(s => s.cityId === selectedCityId) : shows;
+  // Browse-mode grouping: partitioned by active date and theatre (no multi-day duplicates)
+  const { theatreGroups, totalScreeningsOnDate } = useMemo(() => {
+    let filtered = selectedCityId ? shows.filter((s) => s.cityId === selectedCityId) : shows;
+    if (selectedTheatreId != null) {
+      filtered = filtered.filter((s) => s.theatreId === selectedTheatreId);
+    }
+    if (selectedDate) {
+      filtered = filtered.filter((s) => s.startAt && s.startAt.startsWith(selectedDate));
+    }
     if (browseFormat !== 'ALL') {
-      filtered = filtered.filter(s => {
-        const n = (s.screenName || '').toUpperCase();
+      filtered = filtered.filter((s) => {
+        const n = ((s.presentationFormat || '') + ' ' + (s.screenName || '')).toUpperCase();
         if (browseFormat === 'IMAX') return n.includes('IMAX');
         if (browseFormat === '4DX') return n.includes('4DX');
         if (browseFormat === 'DOLBY') return n.includes('DOLBY') || n.includes('ATMOS');
@@ -166,7 +239,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
       });
     }
     if (browseTime !== 'ALL') {
-      filtered = filtered.filter(s => {
+      filtered = filtered.filter((s) => {
         const h = new Date(s.startAt).getHours();
         if (browseTime === 'MORNING') return h < 12;
         if (browseTime === 'AFTERNOON') return h >= 12 && h < 16;
@@ -175,14 +248,19 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
         return true;
       });
     }
+
+    // Authoritative distinct screening count: distinct showIds on this date
+    const distinctShowIds = new Set(filtered.map((s) => s.showId));
+
     const map = new Map<number, { theatreName: string; screenMap: Map<number, { screenName: string; shows: Show[] }> }>();
-    filtered.forEach(show => {
+    filtered.forEach((show) => {
       if (!map.has(show.theatreId)) map.set(show.theatreId, { theatreName: show.theatreName, screenMap: new Map() });
       const te = map.get(show.theatreId)!;
       if (!te.screenMap.has(show.screenId)) te.screenMap.set(show.screenId, { screenName: show.screenName, shows: [] });
       te.screenMap.get(show.screenId)!.shows.push(show);
     });
-    return Array.from(map.entries()).map(([theatreId, entry]) => ({
+
+    const groups: TheatreGroup[] = Array.from(map.entries()).map(([theatreId, entry]) => ({
       theatreId,
       theatreName: entry.theatreName,
       screens: Array.from(entry.screenMap.entries()).map(([screenId, se]) => ({
@@ -191,7 +269,9 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
         shows: se.shows.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
       })),
     }));
-  }, [shows, selectedCityId, browseFormat, browseTime]);
+
+    return { theatreGroups: groups, totalScreeningsOnDate: distinctShowIds.size };
+  }, [shows, selectedCityId, selectedTheatreId, selectedDate, browseFormat, browseTime]);
 
   if (loading) {
     return <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-secondary)' }}>Loading movie details...</div>;
@@ -331,8 +411,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
                 className="select"
                 value={partySize}
                 min={1}
-                max={10}
-                onChange={e => { setPartySize(Math.max(1, Math.min(10, parseInt(e.target.value) || 1))); trackFilterChange(); }}
+                onChange={e => { setPartySize(Math.max(1, parseInt(e.target.value) || 1)); trackFilterChange(); }}
                 style={{ width: '100%' }}
               />
             </div>
@@ -417,6 +496,29 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
                 style={{ width: '100%' }}
               />
             </div>
+
+            {/* Multiplex / Theatre Filter */}
+            <div>
+              <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
+                <MapPin size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Multiplex (Optional)
+              </label>
+              <select
+                id="select-decision-theatre"
+                className="select"
+                value={selectedTheatreId !== null ? String(selectedTheatreId) : ''}
+                onChange={e => {
+                  const val = e.target.value ? parseInt(e.target.value, 10) : null;
+                  setSelectedTheatreId(val);
+                  trackFilterChange();
+                }}
+                style={{ width: '100%' }}
+              >
+                <option value="">All Multiplexes in City</option>
+                {availableTheatres.map(t => (
+                  <option key={t.id} value={String(t.id)}>{t.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Priority Selector */}
@@ -477,14 +579,16 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
               onClick={() => {
                 setPriority('BALANCED');
                 setPartySize(2);
+                setSelectedTheatreId(initialTheatreId ?? null);
                 setLanguageCode('');
                 setFormatFilter('ALL');
                 setTimeFilter('ALL');
-                setDateFrom(getISODate(0));
-                setDateTo(getISODate(7));
+                setDateFrom(initialDate || getISODate(0));
+                setDateTo(initialDate || getISODate(7));
                 setBudgetTotal('');
                 setFrictionAlert(null);
                 setFilterChangeCount(0);
+                setShowRec(null);
               }}
             >
               Reset Constraints
@@ -517,6 +621,20 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
             <Sparkles size={28} color="#e50914" style={{ marginBottom: '12px' }} />
             <div>Evaluating all shows with {PRIORITY_CONFIG[priority].label} ranking...</div>
+          </div>
+        )}
+
+        {/* Idle state — user has not yet clicked Find Best Shows */}
+        {!recLoading && !showRec && (
+          <div style={{
+            textAlign: 'center', padding: '36px 20px',
+            background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)',
+            border: '1px dashed var(--border-subtle)',
+          }}>
+            <Sparkles size={24} color="var(--text-muted)" style={{ marginBottom: '10px' }} />
+            <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>
+              Configure your preferences above, then click <strong style={{ color: 'var(--accent-crimson)' }}>Find Best Shows</strong> to get AI-ranked recommendations.
+            </p>
           </div>
         )}
 
@@ -614,6 +732,40 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
                           ))}
                         </div>
                       )}
+
+                      {/* Recommended Seats & Group Fit */}
+                      {c.recommendedSeatLabels && c.recommendedSeatLabels.length > 0 && (
+                        <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.82rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Recommended Seats:</span>
+                            <span className="badge badge-emerald" style={{ fontWeight: 700, letterSpacing: '0.02em' }}>
+                              {c.recommendedSeatLabels.join(', ')}
+                            </span>
+                            {c.viewingQualityScore != null && (
+                              <span className="badge badge-gold" style={{ fontSize: '0.72rem' }}>
+                                Viewing: {c.viewingQualityScore}/100
+                              </span>
+                            )}
+                            {c.alternativeSeatLabels && c.alternativeSeatLabels.length > 0 && (
+                              <span style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                <span>· Alt:</span>
+                                <span className="badge badge-slate">{c.alternativeSeatLabels.join(', ')}</span>
+                              </span>
+                            )}
+                          </div>
+                          {c.seatFitDescription && (
+                            <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                              Arrangement: <span style={{ color: '#e2e8f0' }}>{c.seatFitDescription}</span>
+                            </div>
+                          )}
+                          {c.seatingTradeoff && (
+                            <div style={{ fontSize: '0.75rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span>ℹ</span>
+                              <span>{c.seatingTradeoff}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Score + CTA */}
@@ -687,12 +839,42 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
       {/* BROWSE SHOWTIMES (manual, all shows)                         */}
       {/* ============================================================ */}
       <section data-testid="theatre-grouped-showtimes-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
           <div>
-            <h2>Browse All Showtimes</h2>
-            <p>Explore all scheduled shows by theatre — click a showtime to see the seat map</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0 }}>Browse All Showtimes</h2>
+              {selectedDate && (
+                <span className="badge badge-slate" style={{ fontSize: '0.82rem', padding: '4px 10px', fontWeight: 600 }}>
+                  {totalScreeningsOnDate} {totalScreeningsOnDate === 1 ? 'screening' : 'screenings'}{selectedTheatreName ? ` at ${selectedTheatreName}` : ''} on {formatFullDate(selectedDate)}
+                </span>
+              )}
+            </div>
+            <p style={{ margin: '6px 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              Explore all scheduled shows by theatre — click a showtime to choose your seats
+            </p>
           </div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Multiplex Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <MapPin size={14} color="var(--accent-crimson)" />
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Multiplex:</span>
+              <select
+                id="select-browse-theatre"
+                className="select"
+                value={selectedTheatreId !== null ? String(selectedTheatreId) : ''}
+                onChange={e => {
+                  const val = e.target.value ? parseInt(e.target.value, 10) : null;
+                  setSelectedTheatreId(val);
+                }}
+                style={{ fontSize: '0.85rem', height: '34px', padding: '6px 12px' }}
+              >
+                <option value="">All Multiplexes ({availableTheatres.length})</option>
+                {availableTheatres.map(t => (
+                  <option key={t.id} value={String(t.id)}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            {/* Format Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Filter size={14} color="var(--accent-crimson)" />
               <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Format:</span>
@@ -705,6 +887,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
                 <option value="2D">2D</option>
               </select>
             </div>
+            {/* Timing Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Clock size={14} color="var(--accent-gold)" />
               <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Timing:</span>
@@ -718,6 +901,54 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({ movieId, onN
             </div>
           </div>
         </div>
+
+        {/* Date Selector Ribbon */}
+        {availableDates.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              gap: '10px',
+              overflowX: 'auto',
+              paddingBottom: '12px',
+              marginBottom: '20px',
+              scrollbarWidth: 'thin',
+            }}
+            data-testid="date-selector-ribbon"
+          >
+            {availableDates.map(dStr => {
+              const label = formatDateLabel(dStr);
+              const isSelected = dStr === selectedDate;
+              return (
+                <button
+                  key={dStr}
+                  onClick={() => setSelectedDate(dStr)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: '100px',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: isSelected ? '2px solid var(--accent-crimson)' : '1px solid var(--border-medium)',
+                    background: isSelected ? 'rgba(229, 9, 20, 0.15)' : 'var(--bg-elevated)',
+                    color: isSelected ? '#ffffff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  data-testid={`date-pill-${dStr}`}
+                >
+                  <span style={{ fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700, color: isSelected ? 'var(--accent-crimson)' : 'var(--text-muted)' }}>
+                    {label.prefix}
+                  </span>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 800, marginTop: '2px' }}>
+                    {label.sub}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <DisplayOnlyBanner />
 

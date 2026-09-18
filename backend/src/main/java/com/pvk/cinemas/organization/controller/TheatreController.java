@@ -47,7 +47,9 @@ public class TheatreController {
     }
 
     @GetMapping("/{theatreId}/shows")
-    public ResponseEntity<ApiResponse<List<ShowResponse>>> getShows(@PathVariable Integer theatreId) {
-        return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForTheatre(theatreId)));
+    public ResponseEntity<ApiResponse<List<ShowResponse>>> getShows(
+            @PathVariable Integer theatreId,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
+        return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForTheatre(theatreId, date)));
     }
 }

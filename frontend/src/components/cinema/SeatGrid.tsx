@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
 import type { SeatAvailabilityDetail } from '../../types/show';
 import type { SeatQualityScore } from '../../types/booking';
-import { Check, X, ShieldAlert, Clock } from 'lucide-react';
+import { Check, X, ShieldAlert, Clock, Sparkles } from 'lucide-react';
 
 interface SeatGridProps {
   seats: SeatAvailabilityDetail[];
   selectedSeatIds?: number[];
+  highlightedSeatIds?: number[];
   onToggleSeat?: (seatId: number) => void;
   isInteractive?: boolean; // True for manager override or customer selection
   isCustomerSelection?: boolean; // True for customer interactive selection
@@ -15,6 +16,7 @@ interface SeatGridProps {
 export const SeatGrid: React.FC<SeatGridProps> = ({
   seats,
   selectedSeatIds = [],
+  highlightedSeatIds = [],
   onToggleSeat,
   isInteractive = false,
   isCustomerSelection = false,
@@ -82,6 +84,7 @@ export const SeatGrid: React.FC<SeatGridProps> = ({
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               {rowSeats.map((seat) => {
                 const isSelected = selectedSeatIds.includes(seat.seatId);
+                const isHighlighted = highlightedSeatIds.includes(seat.seatId);
                 const isAvailable = seat.availabilityStatus === 'AVAILABLE';
                 const hasAisle = Boolean(seat.aisleAfter);
                 const zone = (seat.pricingZone || 'STANDARD').toUpperCase();
@@ -139,11 +142,21 @@ export const SeatGrid: React.FC<SeatGridProps> = ({
                       style={{
                         cursor: interactable ? 'pointer' : 'default',
                         position: 'relative',
-                        outline: isSelected ? '2px solid #ffffff' : 'none',
+                        outline: isSelected
+                          ? '2px solid #ffffff'
+                          : isHighlighted && isAvailable
+                          ? '2px dashed var(--accent-gold, #f59e0b)'
+                          : 'none',
                         outlineOffset: '2px',
-                        transform: isSelected ? 'scale(1.15)' : 'none',
+                        transform: isSelected
+                          ? 'scale(1.15)'
+                          : isHighlighted && isAvailable
+                          ? 'scale(1.08)'
+                          : 'none',
                         boxShadow: isSelected
                           ? '0 0 12px rgba(229, 9, 20, 0.7)'
+                          : isHighlighted && isAvailable
+                          ? '0 0 10px rgba(245, 158, 11, 0.65)'
                           : isSweetSpotTier && isAvailable
                           ? '0 0 6px rgba(245, 158, 11, 0.4)'
                           : 'none',
@@ -238,6 +251,15 @@ export const SeatGrid: React.FC<SeatGridProps> = ({
               &bull;
             </div>
             <span>Your Selected Seats</span>
+          </div>
+        )}
+
+        {isCustomerSelection && (
+          <div className="seat-legend-item">
+            <div className="seat-node" style={{ background: 'rgba(245, 158, 11, 0.25)', color: '#fbbf24', border: '2px solid #f59e0b', boxShadow: '0 0 10px rgba(245, 158, 11, 0.65)' }} aria-hidden="true">
+              <Sparkles size={11} />
+            </div>
+            <span>AI Recommendation (Highlighted)</span>
           </div>
         )}
 

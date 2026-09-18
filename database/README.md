@@ -1,9 +1,7 @@
 # PVK Cinemas — Database Subsystem
 
 ## 1. Overview
-This directory contains the authoritative MySQL 8.0 database schema and migration baseline for the **PVK Cinemas** platform. The physical design strictly reflects `PVK_Cinemas_Final_Database_Design.docx` (Authoritative Document #5) and encompasses exactly **28 relational entities** in 3NF.
-
-Online ticket booking, seat reservations, checkout, cart processing, and payment structures are explicitly excluded in accordance with `CHANGE-004` and `DECISION-007`.
+This directory contains the authoritative MySQL 8.0 database schema and migration baseline for the **PVK Cinemas** platform. The physical design establishes the relational schema in 3NF and includes end-to-end support for catalogue discovery, multiplex operations, AI show/seat decision support, temporary seat holds, and booking workflows (migrations V1 through V7).
 
 ---
 
@@ -24,9 +22,14 @@ Online ticket booking, seat reservations, checkout, cart processing, and payment
 ```
 database/
 ├── migrations/
-│   ├── V1__init_schema.sql         # DDL establishing all 28 tables, PKs, FKs, UQs, CHECKs, indexes
-│   └── V2__seed_reference_data.sql # DML populating roles, permissions, formats, seat types, cities, etc.
-└── README.md                       # This document
+│   ├── V1__init_schema.sql                  # Baseline DDL establishing tables, PKs, FKs, UQs, CHECKs, indexes
+│   ├── V2__seed_reference_data.sql          # Reference DML: roles, permissions, formats, seat types, cities
+│   ├── V3__demo_realistic_seed.sql          # Realistic demo dataset: 5 cities, 25 theatres, 250 screens, 10 movies
+│   ├── V4__booking_payment_seat_hold.sql    # Booking, simulated payment, SEAT_HOLD table and permissions
+│   ├── V5__demo_dataset_reseed.sql          # Extended realistic show schedule & availability baseline
+│   ├── V6__seat_geometry_zones_pricing.sql  # Pricing zones (VALUE, STANDARD, PREMIUM), aisle geometry
+│   └── V7__seat_blocking_user_phone.sql     # Manager seat blocking constraints, nullable user phone
+└── README.md                                # This document
 ```
 
 ---

@@ -107,11 +107,26 @@ export const ShowtimePill: React.FC<ShowtimePillProps> = ({ show, onSelect }) =>
           </span>
         )}
 
-        {show.minPrice != null && !isCancelled && (
+        {(show.startingPrice != null || show.minPrice != null) && !isCancelled && (
           <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
-            From ₹{Math.round(show.minPrice)}
+            From ₹{Math.round(show.startingPrice ?? show.minPrice!)}
           </span>
         )}
+      </div>
+
+      <div style={{
+        marginTop: '4px',
+        width: '100%',
+        textAlign: 'center',
+        padding: '3px 0',
+        borderRadius: '4px',
+        background: isCancelled || isSoldOut ? 'transparent' : 'rgba(229, 9, 20, 0.12)',
+        color: isCancelled || isSoldOut ? 'var(--text-muted)' : '#ff4d5a',
+        fontSize: '0.72rem',
+        fontWeight: 700,
+        letterSpacing: '0.02em',
+      }}>
+        {isCancelled ? 'Unavailable' : isSoldOut ? 'Sold Out' : 'Choose Seats →'}
       </div>
     </button>
   );

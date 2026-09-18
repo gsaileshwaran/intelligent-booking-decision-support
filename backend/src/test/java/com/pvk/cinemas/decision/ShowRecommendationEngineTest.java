@@ -15,6 +15,7 @@ import com.pvk.cinemas.decision.dto.SeatScoreDTO;
 import com.pvk.cinemas.decision.dto.ShowCandidateDTO;
 import com.pvk.cinemas.decision.dto.ShowRecommendationRequest;
 import com.pvk.cinemas.decision.dto.ShowRecommendationResponse;
+import com.pvk.cinemas.decision.engine.SeatGroupPlanner;
 import com.pvk.cinemas.decision.engine.SeatScoringEngine;
 import com.pvk.cinemas.decision.engine.ShowRecommendationEngine;
 import com.pvk.cinemas.infrastructure.model.Screen;
@@ -85,12 +86,13 @@ class ShowRecommendationEngineTest {
         seatHoldService = Mockito.mock(SeatHoldService.class);
         seatScoringEngine = Mockito.mock(SeatScoringEngine.class);
         seatPricingService = Mockito.mock(com.pvk.cinemas.booking.service.SeatPricingService.class);
+        SeatGroupPlanner seatGroupPlanner = new SeatGroupPlanner(seatScoringEngine, seatPricingService);
 
         engine = new ShowRecommendationEngine(
                 showRepository, showSeatRepository, movieRepository, movieLanguageRepository,
                 languageRepository, screenCapabilityRepository, presentationFormatRepository,
                 screenRepository, seatRepository, theatreRepository, cityRepository,
-                seatHoldService, seatScoringEngine, seatPricingService
+                seatHoldService, seatScoringEngine, seatPricingService, seatGroupPlanner
         );
 
         // Movie

@@ -27,14 +27,34 @@ public class ShowCandidateDTO {
     private List<String> tradeOffs = new ArrayList<>();
     private List<Long> recommendedSeatIds = new ArrayList<>();
     private List<String> recommendedSeatLabels = new ArrayList<>();
+    private List<String> alternativeSeatLabels = new ArrayList<>();
+    private String seatFitDescription;
+    private Integer viewingQualityScore;
+    private String seatingTradeoff;
 
     public ShowCandidateDTO() {}
+
+    public String getSeatFitDescription() { return seatFitDescription; }
+    public void setSeatFitDescription(String seatFitDescription) { this.seatFitDescription = seatFitDescription; }
+
+    public Integer getViewingQualityScore() { return viewingQualityScore; }
+    public void setViewingQualityScore(Integer viewingQualityScore) { this.viewingQualityScore = viewingQualityScore; }
+
+    public String getSeatingTradeoff() { return seatingTradeoff; }
+    public void setSeatingTradeoff(String seatingTradeoff) { this.seatingTradeoff = seatingTradeoff; }
+
+    public List<String> getAlternativeSeatLabels() { return alternativeSeatLabels; }
+    public void setAlternativeSeatLabels(List<String> alternativeSeatLabels) { this.alternativeSeatLabels = alternativeSeatLabels; }
 
     public List<Long> getRecommendedSeatIds() { return recommendedSeatIds; }
     public void setRecommendedSeatIds(List<Long> recommendedSeatIds) { this.recommendedSeatIds = recommendedSeatIds; }
 
     public List<String> getRecommendedSeatLabels() { return recommendedSeatLabels; }
     public void setRecommendedSeatLabels(List<String> recommendedSeatLabels) { this.recommendedSeatLabels = recommendedSeatLabels; }
+
+    public String getStartTime() { return formattedTime; }
+    public Integer getAvailableSeatCount() { return availableSeats; }
+    public BigDecimal getStartingPrice() { return ticketPrice; }
 
     public String getShowDate() { return showDate; }
     public void setShowDate(String showDate) { this.showDate = showDate; }

@@ -136,8 +136,11 @@ export const moviesApi = {
   getMovieLanguages: async (movieId: number): Promise<Language[]> => {
     return request<Language[]>(`/api/v1/movies/${movieId}/languages`);
   },
-  getMovieShows: async (movieId: number, cityId?: number): Promise<Show[]> => {
-    const qs = cityId ? `?cityId=${cityId}` : '';
+  getMovieShows: async (movieId: number, cityId?: number, date?: string): Promise<Show[]> => {
+    const params = new URLSearchParams();
+    if (cityId) params.append('cityId', String(cityId));
+    if (date) params.append('date', date);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return request<Show[]>(`/api/v1/movies/${movieId}/shows${qs}`);
   },
 };
@@ -164,8 +167,9 @@ export const theatresApi = {
   getTheatre: async (theatreId: number): Promise<Theatre> => {
     return request<Theatre>(`/api/v1/theatres/${theatreId}`);
   },
-  getTheatreShows: async (theatreId: number): Promise<Show[]> => {
-    return request<Show[]>(`/api/v1/theatres/${theatreId}/shows`);
+  getTheatreShows: async (theatreId: number, date?: string): Promise<Show[]> => {
+    const qs = date ? `?date=${date}` : '';
+    return request<Show[]>(`/api/v1/theatres/${theatreId}/shows${qs}`);
   },
   getTheatreScreens: async (theatreId: number): Promise<Screen[]> => {
     return request<Screen[]>(`/api/v1/theatres/${theatreId}/screens`);

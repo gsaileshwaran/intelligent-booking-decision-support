@@ -68,6 +68,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(err);
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
+        String traceId = UUID.randomUUID().toString();
+        ErrorResponse err = new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "VALIDATION_FAILED",
+                ex.getMessage(),
+                request.getRequestURI(),
+                traceId
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(err);
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
         String traceId = UUID.randomUUID().toString();

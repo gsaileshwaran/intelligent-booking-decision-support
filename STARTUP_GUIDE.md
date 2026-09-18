@@ -148,16 +148,16 @@ Open your web browser (Chrome, Edge, Firefox) and navigate to:
 
 To run the complete system verification test suite:
 
-### Backend Integration Tests (61 Tests)
+### Backend Integration Tests (116 Tests)
 ```powershell
 cd backend
 mvn clean test
 ```
 
-### Search Service Unit & Pipeline Tests (75 Tests)
+### Search Service Unit & Pipeline Tests (81 Tests)
 ```powershell
 cd search-service
-python -m pytest
+python -m pytest tests
 ```
 
 ### Frontend Production Build Test

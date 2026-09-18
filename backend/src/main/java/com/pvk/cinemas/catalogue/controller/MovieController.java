@@ -53,7 +53,8 @@ public class MovieController {
     @GetMapping("/{movieId}/shows")
     public ResponseEntity<ApiResponse<List<ShowResponse>>> getMovieShows(
             @PathVariable Long movieId,
-            @RequestParam(required = false) Integer cityId) {
-        return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForMovie(movieId, cityId)));
+            @RequestParam(required = false) Integer cityId,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
+        return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForMovie(movieId, cityId, date)));
     }
 }

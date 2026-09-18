@@ -24,6 +24,11 @@ public class ShowResponse {
     private Integer totalSeats;
     private java.math.BigDecimal minPrice;
     private String posterUrl;
+    private String showDate;
+    private String startTime;
+    private Integer availableSeatCount;
+    private java.math.BigDecimal startingPrice;
+    private String language;
 
     public ShowResponse() {}
 
@@ -93,4 +98,19 @@ public class ShowResponse {
 
     public String getPosterUrl() { return posterUrl; }
     public void setPosterUrl(String posterUrl) { this.posterUrl = posterUrl; }
+
+    public String getShowDate() { return showDate; }
+    public void setShowDate(String showDate) { this.showDate = showDate; }
+
+    public String getStartTime() { return startTime; }
+    public void setStartTime(String startTime) { this.startTime = startTime; }
+
+    public Integer getAvailableSeatCount() { return availableSeatCount != null ? availableSeatCount : availableSeats; }
+    public void setAvailableSeatCount(Integer availableSeatCount) { this.availableSeatCount = availableSeatCount; }
+
+    public java.math.BigDecimal getStartingPrice() { return startingPrice != null ? startingPrice : minPrice; }
+    public void setStartingPrice(java.math.BigDecimal startingPrice) { this.startingPrice = startingPrice; }
+
+    public String getLanguage() { return language != null ? language : languageName; }
+    public void setLanguage(String language) { this.language = language; }
 }
