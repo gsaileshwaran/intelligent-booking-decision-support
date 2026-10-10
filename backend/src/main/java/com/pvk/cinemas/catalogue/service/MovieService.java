@@ -54,7 +54,7 @@ public class MovieService {
     }
 
     @Transactional(readOnly = true)
-    public Page<MovieResponse> getMovies(String status, Integer cityId, String language, Long languageId, Long genreId, Long certificationId, String demandTier, Pageable pageable) {
+    public Page<MovieResponse> getMovies(String q, String status, Integer cityId, String language, Long languageId, Long genreId, Long certificationId, String demandTier, String sort, Pageable pageable) {
         List<Movie> movies;
         String cleanStatus = (status != null && !status.isBlank()) ? status.trim().toUpperCase() : null;
         if (cityId != null) {
@@ -63,6 +63,15 @@ public class MovieService {
             movies = movieRepository.findByMovieStatus(cleanStatus);
         } else {
             movies = movieRepository.findAll();
+        }
+
+        // Apply text query filter q if provided
+        if (q != null && !q.isBlank()) {
+            String qClean = q.trim().toLowerCase();
+            movies = movies.stream()
+                    .filter(m -> (m.getTitle() != null && m.getTitle().toLowerCase().contains(qClean))
+                            || (m.getSynopsis() != null && m.getSynopsis().toLowerCase().contains(qClean)))
+                    .collect(Collectors.toList());
         }
 
         // Apply lifecycle status filter if not already filtered
@@ -132,6 +141,24 @@ public class MovieService {
         // Prevent duplicate movies
         movies = movies.stream().distinct().collect(Collectors.toList());
 
+        // Apply sorting if specified
+        if (sort != null && !sort.isBlank()) {
+            String s = sort.trim().toLowerCase();
+            if (s.startsWith("title")) {
+                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getTitle, String.CASE_INSENSITIVE_ORDER);
+                if (s.endsWith("desc")) comp = comp.reversed();
+                movies.sort(comp);
+            } else if (s.startsWith("releasedate") || s.startsWith("release_date")) {
+                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getReleaseDate, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+                if (s.endsWith("desc")) comp = comp.reversed();
+                movies.sort(comp);
+            } else if (s.startsWith("popularityscore") || s.startsWith("popularity_score")) {
+                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getPopularityScore, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+                if (s.endsWith("desc")) comp = comp.reversed();
+                movies.sort(comp);
+            }
+        }
+
         int start = (int) pageable.getOffset();
         int end = Math.min((start + pageable.getPageSize()), movies.size());
         List<MovieResponse> pagedList = (start <= end && start < movies.size()) ?
@@ -139,6 +166,11 @@ public class MovieService {
                 List.of();
 
         return new PageImpl<>(pagedList, pageable, movies.size());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<MovieResponse> getMovies(String status, Integer cityId, String language, Long languageId, Long genreId, Long certificationId, String demandTier, Pageable pageable) {
+        return getMovies(null, status, cityId, language, languageId, genreId, certificationId, demandTier, null, pageable);
     }
 
     @Transactional(readOnly = true)

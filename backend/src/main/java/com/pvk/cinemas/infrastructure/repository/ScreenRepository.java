@@ -25,6 +25,13 @@ public interface ScreenRepository extends JpaRepository<Screen, Long> {
         return theatreId != null ? findByTheatreIdAndStatus(theatreId.longValue(), status) : java.util.Collections.emptyList();
     }
 
+    List<Screen> findByTheatreIdInAndStatus(List<Long> theatreIds, String status);
+    default List<Screen> findByTheatreIdInAndIsActiveTrue(List<Long> theatreIds) {
+        return (theatreIds != null && !theatreIds.isEmpty())
+                ? findByTheatreIdInAndStatus(theatreIds, "ACTIVE")
+                : java.util.Collections.emptyList();
+    }
+
     List<Screen> findByTheatreId(Long theatreId);
     default List<Screen> findByTheatreId(Integer theatreId) {
         return theatreId != null ? findByTheatreId(theatreId.longValue()) : java.util.Collections.emptyList();

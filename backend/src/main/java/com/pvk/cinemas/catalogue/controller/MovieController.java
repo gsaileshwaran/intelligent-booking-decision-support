@@ -28,6 +28,7 @@ public class MovieController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<Page<MovieResponse>>> getMovies(
+            @RequestParam(required = false) String q,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Integer cityId,
             @RequestParam(required = false) String language,
@@ -35,9 +36,10 @@ public class MovieController {
             @RequestParam(required = false) Long genreId,
             @RequestParam(required = false) Long certificationId,
             @RequestParam(required = false) String demandTier,
+            @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(movieService.getMovies(status, cityId, language, languageId, genreId, certificationId, demandTier, PageRequest.of(page, size))));
+        return ResponseEntity.ok(ApiResponse.ok(movieService.getMovies(q, status, cityId, language, languageId, genreId, certificationId, demandTier, sort, PageRequest.of(page, size))));
     }
 
     @GetMapping("/{movieId}")
@@ -59,7 +61,12 @@ public class MovieController {
     public ResponseEntity<ApiResponse<List<ShowResponse>>> getMovieShows(
             @PathVariable Long movieId,
             @RequestParam(required = false) Integer cityId,
-            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
-        return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForMovie(movieId, cityId, date)));
+            @RequestParam(required = false) Long theatreId,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+            @RequestParam(required = false) Long languageId,
+            @RequestParam(required = false) Long presentationFormatId,
+            @RequestParam(required = false) Long audioFormatId) {
+        return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForMovie(
+                movieId, cityId, theatreId, date, languageId, presentationFormatId, audioFormatId)));
     }
 }

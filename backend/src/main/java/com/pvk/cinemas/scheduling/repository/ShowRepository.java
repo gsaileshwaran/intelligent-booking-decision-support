@@ -49,6 +49,7 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     List<Show> findByScreenCapabilityIdIn(List<Long> screenCapabilityIds);
     List<Show> findByScreenCapabilityIdInAndStatusIn(List<Long> screenCapabilityIds, List<String> statuses);
     List<Show> findByMovieLanguageIdIn(List<Long> movieLanguageIds);
+    List<Show> findByMovieLanguageIdInAndShowDate(List<Long> movieLanguageIds, java.time.LocalDate showDate);
     List<Show> findByMovieLanguageIdInAndStatusIn(List<Long> movieLanguageIds, List<String> statuses);
     List<Show> findByStatus(String status);
 

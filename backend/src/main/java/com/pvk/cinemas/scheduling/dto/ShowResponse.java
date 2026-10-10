@@ -20,6 +20,10 @@ public class ShowResponse {
     private String showStatus;
     private String presentationFormat;
     private String formatCode;
+    private Long presentationFormatId;
+    private String audioFormat;
+    private String audioFormatCode;
+    private Long audioFormatId;
     private Integer availableSeats;
     private Integer totalSeats;
     private java.math.BigDecimal minPrice;
@@ -88,6 +92,20 @@ public class ShowResponse {
 
     public String getFormatCode() { return formatCode; }
     public void setFormatCode(String formatCode) { this.formatCode = formatCode; }
+
+    public Long getPresentationFormatId() { return presentationFormatId; }
+    public void setPresentationFormatId(Long presentationFormatId) { this.presentationFormatId = presentationFormatId; }
+    public void setPresentationFormatId(Integer presentationFormatId) { this.presentationFormatId = presentationFormatId != null ? presentationFormatId.longValue() : null; }
+
+    public String getAudioFormat() { return audioFormat; }
+    public void setAudioFormat(String audioFormat) { this.audioFormat = audioFormat; }
+
+    public String getAudioFormatCode() { return audioFormatCode; }
+    public void setAudioFormatCode(String audioFormatCode) { this.audioFormatCode = audioFormatCode; }
+
+    public Long getAudioFormatId() { return audioFormatId; }
+    public void setAudioFormatId(Long audioFormatId) { this.audioFormatId = audioFormatId; }
+    public void setAudioFormatId(Integer audioFormatId) { this.audioFormatId = audioFormatId != null ? audioFormatId.longValue() : null; }
 
     public Integer getAvailableSeats() { return availableSeats; }
     public void setAvailableSeats(Integer availableSeats) { this.availableSeats = availableSeats; }

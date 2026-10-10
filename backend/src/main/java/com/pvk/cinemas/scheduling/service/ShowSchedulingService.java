@@ -43,9 +43,16 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import com.pvk.cinemas.catalogue.model.AudioFormat;
+import com.pvk.cinemas.catalogue.model.PresentationFormat;
+import com.pvk.cinemas.organization.model.City;
 
 @Service
 public class ShowSchedulingService {
@@ -441,90 +448,214 @@ public class ShowSchedulingService {
         return mapToResponse(show);
     }
 
+    private static class MappingContext {
+        final Map<Long, MovieLanguage> movieLanguages = new HashMap<>();
+        final Map<Long, Movie> movies = new HashMap<>();
+        final Map<Long, Language> languages = new HashMap<>();
+        final Map<Long, ScreenCapability> screenCapabilities = new HashMap<>();
+        final Map<Long, PresentationFormat> presentationFormats = new HashMap<>();
+        final Map<Long, AudioFormat> audioFormats = new HashMap<>();
+        final Map<Long, Screen> screens = new HashMap<>();
+        final Map<Long, Theatre> theatres = new HashMap<>();
+        final Map<Integer, City> cities = new HashMap<>();
+    }
+
     @Transactional(readOnly = true)
-    public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date) {
+    public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date, Long movieId) {
+        if (theatreId == null) {
+            throw new ResourceNotFoundException("Theatre not found: null");
+        }
+        theatreRepository.findById(theatreId)
+                .orElseThrow(() -> new ResourceNotFoundException("Theatre not found: " + theatreId));
+
         if (date != null && businessDateProvider != null) {
             businessDateProvider.validateCalendarRange(date);
         }
-        if (theatreId == null) {
-            return java.util.Collections.emptyList();
+
+        List<Long> mlIds = null;
+        if (movieId != null) {
+            movieRepository.findById(movieId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + movieId));
+            List<MovieLanguage> mls = movieLanguageRepository.findByMovieId(movieId);
+            if (mls.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+            mlIds = mls.stream().map(MovieLanguage::getMovieLanguageId).toList();
         }
+
         List<Screen> screens = screenRepository.findByTheatreIdAndIsActiveTrue(theatreId);
         List<Long> screenIds = screens.stream().map(Screen::getScreenId).toList();
         if (screenIds.isEmpty()) {
             return java.util.Collections.emptyList();
         }
-        List<ScreenCapability> capabilities = screenCapabilityRepository.findByScreenIdIn(screenIds);
-        List<Long> capabilityIds = capabilities.stream().map(ScreenCapability::getScreenCapabilityId).toList();
-        if (capabilityIds.isEmpty()) {
-            return java.util.Collections.emptyList();
+
+        List<Show> shows = (date != null)
+                ? showRepository.findByScreenIdInAndShowDate(screenIds, date)
+                : showRepository.findByScreenIdIn(screenIds);
+
+        if (date != null && shows.isEmpty()) {
+            shows = showRepository.findByScreenIdIn(screenIds).stream()
+                    .filter(s -> s.getShowDate() != null ? s.getShowDate().equals(date) : (s.getStartAt() != null && s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date)))
+                    .collect(Collectors.toList());
         }
-        return showRepository.findByScreenCapabilityIdIn(capabilityIds).stream()
-                .filter(s -> {
-                    if (date == null) return true;
-                    if (s.getShowDate() != null) return s.getShowDate().equals(date);
-                    if (s.getStartAt() == null) return false;
-                    return s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date);
-                })
-                .map(this::mapToResponse)
+
+        if (mlIds != null) {
+            final List<Long> filterMlIds = mlIds;
+            shows = shows.stream().filter(s -> filterMlIds.contains(s.getMovieLanguageId())).collect(Collectors.toList());
+        }
+
+        MappingContext ctx = new MappingContext();
+        return shows.stream()
+                .map(s -> mapToResponse(s, ctx))
+                .sorted(Comparator.comparing(ShowResponse::getStartAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ShowResponse::getShowId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date) {
+        return getShowsForTheatre(theatreId, date, null);
     }
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForTheatre(Long theatreId) {
-        return getShowsForTheatre(theatreId, (LocalDate) null);
+        return getShowsForTheatre(theatreId, (LocalDate) null, null);
     }
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForTheatre(Integer theatreId, LocalDate date) {
-        return theatreId != null ? getShowsForTheatre(theatreId.longValue(), date) : java.util.Collections.emptyList();
+        return theatreId != null ? getShowsForTheatre(theatreId.longValue(), date, null) : java.util.Collections.emptyList();
     }
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForTheatre(Integer theatreId) {
-        return getShowsForTheatre(theatreId, (LocalDate) null);
+        return theatreId != null ? getShowsForTheatre(theatreId.longValue(), null, null) : java.util.Collections.emptyList();
     }
 
     @Transactional(readOnly = true)
-    public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId, LocalDate date) {
+    public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId, Long theatreId, LocalDate date, Long languageId, Long presentationFormatId, Long audioFormatId) {
+        if (movieId == null) {
+            throw new ResourceNotFoundException("Movie not found: null");
+        }
+        movieRepository.findById(movieId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + movieId));
+
         if (date != null && businessDateProvider != null) {
             businessDateProvider.validateCalendarRange(date);
         }
+        if (theatreId != null) {
+            theatreRepository.findById(theatreId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Theatre not found: " + theatreId));
+        }
+        if (cityId != null) {
+            cityRepository.findById(cityId.longValue())
+                    .orElseThrow(() -> new ResourceNotFoundException("City not found: " + cityId));
+        }
+
         List<MovieLanguage> mls = movieLanguageRepository.findByMovieId(movieId);
-        List<Long> mlIds = mls.stream().map(MovieLanguage::getMovieLanguageId).toList();
-        if (mlIds.isEmpty()) {
+        if (languageId != null) {
+            mls = mls.stream().filter(ml -> ml.getLanguageId().equals(languageId)).toList();
+        }
+        if (mls.isEmpty()) {
             return java.util.Collections.emptyList();
         }
-        return showRepository.findByMovieLanguageIdIn(mlIds).stream()
-                .filter(s -> {
-                    if (date == null) return true;
-                    if (s.getShowDate() != null) return s.getShowDate().equals(date);
-                    if (s.getStartAt() == null) return false;
-                    return s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date);
-                })
-                .map(this::mapToResponse)
+        List<Long> mlIds = mls.stream().map(MovieLanguage::getMovieLanguageId).toList();
+
+        // Candidate screens pre-filter by theatreId or cityId
+        Set<Long> candidateScreenIds = null;
+        if (theatreId != null) {
+            candidateScreenIds = screenRepository.findByTheatreIdAndIsActiveTrue(theatreId).stream()
+                    .map(Screen::getScreenId)
+                    .collect(Collectors.toSet());
+            if (candidateScreenIds.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+        } else if (cityId != null) {
+            List<Theatre> cityTheatres = theatreRepository.findByCityIdAndIsActiveTrue(cityId.longValue());
+            List<Long> cityTheatreIds = cityTheatres.stream().map(Theatre::getTheatreId).toList();
+            if (cityTheatreIds.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+            candidateScreenIds = screenRepository.findByTheatreIdInAndIsActiveTrue(cityTheatreIds).stream()
+                    .map(Screen::getScreenId)
+                    .collect(Collectors.toSet());
+            if (candidateScreenIds.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+        }
+
+        // Candidate capabilities pre-filter by presentationFormatId or audioFormatId
+        Set<Long> candidateCapabilityIds = null;
+        if (presentationFormatId != null || audioFormatId != null) {
+            candidateCapabilityIds = screenCapabilityRepository.findAll().stream()
+                    .filter(sc -> presentationFormatId == null || presentationFormatId.equals(sc.getPresentationFormatId()))
+                    .filter(sc -> audioFormatId == null || audioFormatId.equals(sc.getAudioFormatId()))
+                    .map(ScreenCapability::getScreenCapabilityId)
+                    .collect(Collectors.toSet());
+            if (candidateCapabilityIds.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+        }
+
+        List<Show> shows = (date != null)
+                ? showRepository.findByMovieLanguageIdInAndShowDate(mlIds, date)
+                : showRepository.findByMovieLanguageIdIn(mlIds);
+
+        if (date != null && shows.isEmpty()) {
+            shows = showRepository.findByMovieLanguageIdIn(mlIds).stream()
+                    .filter(s -> s.getShowDate() != null ? s.getShowDate().equals(date) : (s.getStartAt() != null && s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date)))
+                    .collect(Collectors.toList());
+        }
+
+        if (candidateScreenIds != null) {
+            final Set<Long> validScreens = candidateScreenIds;
+            shows = shows.stream().filter(s -> validScreens.contains(s.getScreenId())).toList();
+        }
+        if (candidateCapabilityIds != null) {
+            final Set<Long> validCaps = candidateCapabilityIds;
+            shows = shows.stream().filter(s -> validCaps.contains(s.getScreenCapabilityId())).toList();
+        }
+
+        MappingContext ctx = new MappingContext();
+        return shows.stream()
+                .map(s -> mapToResponse(s, ctx))
                 .filter(resp -> cityId == null || (resp.getCityId() != null && resp.getCityId().equals(cityId.longValue())))
+                .filter(resp -> theatreId == null || (resp.getTheatreId() != null && resp.getTheatreId().equals(theatreId)))
+                .sorted(Comparator.comparing(ShowResponse::getStartAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ShowResponse::getShowId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
+    public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId, LocalDate date) {
+        return getShowsForMovie(movieId, cityId, null, date, null, null, null);
+    }
+
+    @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId) {
-        return getShowsForMovie(movieId, cityId, null);
+        return getShowsForMovie(movieId, cityId, null, null, null, null, null);
     }
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForMovie(Long movieId) {
-        return getShowsForMovie(movieId, null, null);
+        return getShowsForMovie(movieId, null, null, null, null, null, null);
     }
 
     @Transactional(readOnly = true)
     public ShowResponse getShowById(Long showId) {
+        if (showId == null) {
+            throw new ResourceNotFoundException("Show not found: null");
+        }
         return showRepository.findById(showId)
                 .map(this::mapToResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
     }
 
     private ShowResponse mapToResponse(Show s) {
+        return mapToResponse(s, null);
+    }
+
+    private ShowResponse mapToResponse(Show s, MappingContext ctx) {
         ShowResponse resp = new ShowResponse();
         resp.setShowId(s.getShowId());
         resp.setMovieLanguageId(s.getMovieLanguageId());
@@ -533,38 +664,84 @@ public class ShowSchedulingService {
         resp.setEndAt(s.getEndAt());
         resp.setShowStatus(s.getShowStatus());
 
-        movieLanguageRepository.findById(s.getMovieLanguageId()).ifPresent(ml -> {
+        MovieLanguage ml = (ctx != null)
+                ? ctx.movieLanguages.computeIfAbsent(s.getMovieLanguageId(), id -> movieLanguageRepository.findById(id).orElse(null))
+                : movieLanguageRepository.findById(s.getMovieLanguageId()).orElse(null);
+
+        if (ml != null) {
             resp.setMovieId(ml.getMovieId());
-            movieRepository.findById(ml.getMovieId()).ifPresent(m -> {
+            Movie m = (ctx != null)
+                    ? ctx.movies.computeIfAbsent(ml.getMovieId(), id -> movieRepository.findById(id).orElse(null))
+                    : movieRepository.findById(ml.getMovieId()).orElse(null);
+            if (m != null) {
                 resp.setMovieTitle(m.getTitle());
                 resp.setPosterUrl(m.getPosterUrl());
-            });
-            languageRepository.findById(ml.getLanguageId()).ifPresent(l -> {
+            }
+
+            Language l = (ctx != null)
+                    ? ctx.languages.computeIfAbsent(ml.getLanguageId(), id -> languageRepository.findById(id).orElse(null))
+                    : languageRepository.findById(ml.getLanguageId()).orElse(null);
+            if (l != null) {
                 resp.setLanguageName(l.getLanguageName());
                 resp.setLanguage(l.getLanguageName());
-            });
-        });
+            }
+        }
 
-        screenCapabilityRepository.findById(s.getScreenCapabilityId()).ifPresent(sc -> {
+        ScreenCapability sc = (ctx != null)
+                ? ctx.screenCapabilities.computeIfAbsent(s.getScreenCapabilityId(), id -> screenCapabilityRepository.findById(id).orElse(null))
+                : screenCapabilityRepository.findById(s.getScreenCapabilityId()).orElse(null);
+
+        if (sc != null) {
             resp.setScreenId(sc.getScreenId());
+            resp.setPresentationFormatId(sc.getPresentationFormatId());
+            resp.setAudioFormatId(sc.getAudioFormatId());
+
             if (presentationFormatRepository != null && sc.getPresentationFormatId() != null) {
-                presentationFormatRepository.findById(sc.getPresentationFormatId()).ifPresent(pf -> {
+                PresentationFormat pf = (ctx != null)
+                        ? ctx.presentationFormats.computeIfAbsent(sc.getPresentationFormatId(), id -> presentationFormatRepository.findById(id).orElse(null))
+                        : presentationFormatRepository.findById(sc.getPresentationFormatId()).orElse(null);
+                if (pf != null) {
                     resp.setFormatCode(pf.getFormatCode());
                     resp.setPresentationFormat(pf.getName());
-                });
+                }
             }
-            screenRepository.findById(sc.getScreenId()).ifPresent(scr -> {
+
+            if (audioFormatRepository != null && sc.getAudioFormatId() != null) {
+                AudioFormat af = (ctx != null)
+                        ? ctx.audioFormats.computeIfAbsent(sc.getAudioFormatId(), id -> audioFormatRepository.findById(id).orElse(null))
+                        : audioFormatRepository.findById(sc.getAudioFormatId()).orElse(null);
+                if (af != null) {
+                    resp.setAudioFormatCode(af.getFormatCode());
+                    resp.setAudioFormat(af.getName());
+                }
+            }
+
+            Screen scr = (ctx != null)
+                    ? ctx.screens.computeIfAbsent(sc.getScreenId(), id -> screenRepository.findById(id).orElse(null))
+                    : screenRepository.findById(sc.getScreenId()).orElse(null);
+
+            if (scr != null) {
                 resp.setScreenName(scr.getScreenName());
                 resp.setTheatreId(scr.getTheatreId());
-                theatreRepository.findById(scr.getTheatreId()).ifPresent(th -> {
+
+                Theatre th = (ctx != null)
+                        ? ctx.theatres.computeIfAbsent(scr.getTheatreId(), id -> theatreRepository.findById(id).orElse(null))
+                        : theatreRepository.findById(scr.getTheatreId()).orElse(null);
+
+                if (th != null) {
                     resp.setTheatreName(th.getTheatreName());
                     resp.setCityId(th.getCityId());
                     if (th.getCityId() != null) {
-                        cityRepository.findById(th.getCityId().intValue()).ifPresent(c -> resp.setCityName(c.getCityName()));
+                        City c = (ctx != null)
+                                ? ctx.cities.computeIfAbsent(th.getCityId().intValue(), id -> cityRepository.findById(id).orElse(null))
+                                : cityRepository.findById(th.getCityId().intValue()).orElse(null);
+                        if (c != null) {
+                            resp.setCityName(c.getCityName());
+                        }
                     }
-                });
-            });
-        });
+                }
+            }
+        }
 
         // Availability calculation
         List<ShowSeat> showSeats = showSeatRepository.findByIdShowId(s.getShowId());
