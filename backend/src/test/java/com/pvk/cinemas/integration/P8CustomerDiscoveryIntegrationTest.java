@@ -7,6 +7,8 @@ import com.pvk.cinemas.catalogue.model.Movie;
 import com.pvk.cinemas.catalogue.model.MovieLanguage;
 import com.pvk.cinemas.catalogue.model.PresentationFormat;
 import com.pvk.cinemas.catalogue.repository.*;
+import com.pvk.cinemas.infrastructure.model.Screen;
+import com.pvk.cinemas.infrastructure.repository.ScreenRepository;
 import com.pvk.cinemas.organization.model.City;
 import com.pvk.cinemas.organization.model.Theatre;
 import com.pvk.cinemas.organization.repository.CityRepository;
@@ -49,6 +51,9 @@ public class P8CustomerDiscoveryIntegrationTest {
 
     @Autowired
     private TheatreRepository theatreRepository;
+
+    @Autowired
+    private ScreenRepository screenRepository;
 
     @Autowired
     private MovieRepository movieRepository;
@@ -163,6 +168,11 @@ public class P8CustomerDiscoveryIntegrationTest {
                 ? sampleShow.getShowDate()
                 : sampleShow.getStartAt().atZone(ZoneId.of("Asia/Kolkata")).toLocalDate();
 
+        Screen screen = screenRepository.findById(cap.getScreenId()).orElseThrow();
+        Long theatreId = screen.getTheatreId();
+        Theatre theatre = theatreRepository.findById(theatreId).orElseThrow();
+        Long cityId = theatre.getCityId();
+
         // 1. Filter by languageId
         mockMvc.perform(get("/api/v1/movies/{movieId}/shows?languageId={langId}", movieId, languageId))
                 .andExpect(status().isOk())
@@ -187,12 +197,107 @@ public class P8CustomerDiscoveryIntegrationTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray());
 
-        // 5. Combined multi-parameter filter (date + languageId + presentationFormatId + audioFormatId)
+        // 5. Dedicated filter by cityId (verifying actual returned records match cityId)
+        MvcResult cityResult = mockMvc.perform(get("/api/v1/movies/{movieId}/shows?cityId={cityId}", movieId, cityId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andReturn();
+        JsonNode cityShows = objectMapper.readTree(cityResult.getResponse().getContentAsString()).path("data");
+        assertFalse(cityShows.isEmpty(), "Shows for movie in city must not be empty");
+        for (JsonNode s : cityShows) {
+            assertEquals(cityId, s.path("cityId").asLong(), "Every returned show must match filtered cityId");
+        }
+
+        // 6. Dedicated filter by theatreId (verifying actual returned records match theatreId)
+        MvcResult theatreResult = mockMvc.perform(get("/api/v1/movies/{movieId}/shows?theatreId={theatreId}", movieId, theatreId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andReturn();
+        JsonNode theatreShows = objectMapper.readTree(theatreResult.getResponse().getContentAsString()).path("data");
+        assertFalse(theatreShows.isEmpty(), "Shows for movie in theatre must not be empty");
+        for (JsonNode s : theatreShows) {
+            assertEquals(theatreId, s.path("theatreId").asLong(), "Every returned show must match filtered theatreId");
+        }
+
+        // 7. Combined cityId + theatreId filter
+        MvcResult combinedResult = mockMvc.perform(get("/api/v1/movies/{movieId}/shows?cityId={cityId}&theatreId={theatreId}", movieId, cityId, theatreId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andReturn();
+        JsonNode combinedShows = objectMapper.readTree(combinedResult.getResponse().getContentAsString()).path("data");
+        assertFalse(combinedShows.isEmpty(), "Shows for movie in city and theatre must not be empty");
+        for (JsonNode s : combinedShows) {
+            assertEquals(cityId, s.path("cityId").asLong(), "Combined filter: cityId must match");
+            assertEquals(theatreId, s.path("theatreId").asLong(), "Combined filter: theatreId must match");
+        }
+
+        // 8. Chronological ordering verification for movie-shows discovery endpoint
+        Instant prevMovieShowTime = null;
+        for (JsonNode s : cityShows) {
+            Instant curr = Instant.parse(s.path("startAt").asText());
+            if (prevMovieShowTime != null) {
+                assertFalse(curr.isBefore(prevMovieShowTime), "Movie shows must be returned in chronological order (startAt ASC)");
+            }
+            prevMovieShowTime = curr;
+        }
+
+        // 9. Combined multi-parameter filter (date + languageId + presentationFormatId + audioFormatId)
         mockMvc.perform(get("/api/v1/movies/{movieId}/shows?date={date}&languageId={langId}&presentationFormatId={pfId}&audioFormatId={afId}",
                         movieId, showDate, languageId, presFormatId, audioFormatId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    @DisplayName("P8-02b: Invalid Filter Parameter Semantics (404 for invalid cityId/theatreId/movieId vs 200 empty array for catalogue filters)")
+    void testInvalidFilterAndReferenceSemantics() throws Exception {
+        List<Movie> movies = movieRepository.findAll();
+        assertFalse(movies.isEmpty());
+        Long movieId = movies.get(0).getMovieId();
+
+        List<Theatre> theatres = theatreRepository.findAll();
+        assertFalse(theatres.isEmpty());
+        Long theatreId = theatres.get(0).getTheatreId();
+
+        // 1. Invalid cityId filter on /movies/{movieId}/shows -> 404 RESOURCE_NOT_FOUND
+        mockMvc.perform(get("/api/v1/movies/{movieId}/shows?cityId=999999", movieId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+
+        // 2. Invalid theatreId filter on /movies/{movieId}/shows -> 404 RESOURCE_NOT_FOUND
+        mockMvc.perform(get("/api/v1/movies/{movieId}/shows?theatreId=999999", movieId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+
+        // 3. Invalid movieId filter on /theatres/{theatreId}/shows -> 404 RESOURCE_NOT_FOUND
+        mockMvc.perform(get("/api/v1/theatres/{theatreId}/shows?movieId=999999", theatreId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+
+        // 4. Invalid languageId filter on /movies/{movieId}/shows -> 200 OK with empty array []
+        mockMvc.perform(get("/api/v1/movies/{movieId}/shows?languageId=999999", movieId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty());
+
+        // 5. Invalid presentationFormatId filter on /movies/{movieId}/shows -> 200 OK with empty array []
+        mockMvc.perform(get("/api/v1/movies/{movieId}/shows?presentationFormatId=999999", movieId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty());
+
+        // 6. Invalid audioFormatId filter on /movies/{movieId}/shows -> 200 OK with empty array []
+        mockMvc.perform(get("/api/v1/movies/{movieId}/shows?audioFormatId=999999", movieId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty());
     }
 
     @Test
