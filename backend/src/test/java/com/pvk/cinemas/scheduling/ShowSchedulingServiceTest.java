@@ -5,6 +5,9 @@ import com.pvk.cinemas.availability.model.ShowSeat;
 import com.pvk.cinemas.availability.repository.ShowSeatRepository;
 import com.pvk.cinemas.catalogue.model.Movie;
 import com.pvk.cinemas.catalogue.model.MovieLanguage;
+import com.pvk.cinemas.catalogue.model.AudioFormat;
+import com.pvk.cinemas.catalogue.model.PresentationFormat;
+import com.pvk.cinemas.catalogue.repository.AudioFormatRepository;
 import com.pvk.cinemas.catalogue.repository.LanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieLanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieRepository;
@@ -13,6 +16,7 @@ import com.pvk.cinemas.booking.service.SeatPricingService;
 import com.pvk.cinemas.common.exceptions.BadRequestException;
 import com.pvk.cinemas.common.exceptions.InvalidCapabilityException;
 import com.pvk.cinemas.common.exceptions.InvalidMovieLanguageException;
+import com.pvk.cinemas.common.exceptions.ResourceNotFoundException;
 import com.pvk.cinemas.common.exceptions.ShowOverlapException;
 import com.pvk.cinemas.infrastructure.model.Screen;
 import com.pvk.cinemas.infrastructure.model.Seat;
@@ -78,6 +82,9 @@ class ShowSchedulingServiceTest {
 
     @Mock
     private PresentationFormatRepository presentationFormatRepository;
+
+    @Mock
+    private AudioFormatRepository audioFormatRepository;
 
     @Mock
     private SeatPricingService seatPricingService;
@@ -258,5 +265,240 @@ class ShowSchedulingServiceTest {
 
         assertEquals("Simulated database failure during bulk insert", ex.getMessage());
         // Since method is @Transactional, Spring rollbacks the transaction, preventing SHOW commit
+    }
+
+    @Test
+    @DisplayName("Format Validation: Nonexistent presentationFormatId throws ResourceNotFoundException (404)")
+    void testNonExistentPresentationFormatRejected() {
+        when(screenRepository.findByIdWithPessimisticLock(screenId)).thenReturn(Optional.of(screen));
+        when(movieLanguageRepository.findById(movieLanguageId)).thenReturn(Optional.of(movieLanguage));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+
+        validRequest.setPresentationFormatId(999L);
+        when(presentationFormatRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class, () ->
+                showSchedulingService.createShow(theatreId, validRequest, 1L, "127.0.0.1"));
+    }
+
+    @Test
+    @DisplayName("Format Validation: Nonexistent audioFormatId throws ResourceNotFoundException (404)")
+    void testNonExistentAudioFormatRejected() {
+        when(screenRepository.findByIdWithPessimisticLock(screenId)).thenReturn(Optional.of(screen));
+        when(movieLanguageRepository.findById(movieLanguageId)).thenReturn(Optional.of(movieLanguage));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+
+        validRequest.setAudioFormatId(888L);
+        when(audioFormatRepository.findById(888L)).thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class, () ->
+                showSchedulingService.createShow(theatreId, validRequest, 1L, "127.0.0.1"));
+    }
+
+    @Test
+    @DisplayName("Format Validation: Mismatched presentationFormatId throws BadRequestException (400)")
+    void testPresentationFormatMismatchRejected() {
+        when(screenRepository.findByIdWithPessimisticLock(screenId)).thenReturn(Optional.of(screen));
+        when(movieLanguageRepository.findById(movieLanguageId)).thenReturn(Optional.of(movieLanguage));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+
+        // Capability has presentationFormatId = 1L. Request supplies 2L.
+        validRequest.setPresentationFormatId(2L);
+        PresentationFormat pf = new PresentationFormat(2L, "IMAX", "IMAX format", "IMAX");
+        when(presentationFormatRepository.findById(2L)).thenReturn(Optional.of(pf));
+
+        BadRequestException ex = assertThrows(BadRequestException.class, () ->
+                showSchedulingService.createShow(theatreId, validRequest, 1L, "127.0.0.1"));
+        assertTrue(ex.getMessage().contains("Presentation format does not match"));
+    }
+
+    @Test
+    @DisplayName("Format Validation: Mismatched audioFormatId throws BadRequestException (400)")
+    void testAudioFormatMismatchRejected() {
+        when(screenRepository.findByIdWithPessimisticLock(screenId)).thenReturn(Optional.of(screen));
+        when(movieLanguageRepository.findById(movieLanguageId)).thenReturn(Optional.of(movieLanguage));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+
+        // Capability has audioFormatId = 1L. Request supplies 2L.
+        validRequest.setAudioFormatId(2L);
+        AudioFormat af = new AudioFormat(2L, "ATMOS", "Dolby Atmos", "Atmos");
+        when(audioFormatRepository.findById(2L)).thenReturn(Optional.of(af));
+
+        BadRequestException ex = assertThrows(BadRequestException.class, () ->
+                showSchedulingService.createShow(theatreId, validRequest, 1L, "127.0.0.1"));
+        assertTrue(ex.getMessage().contains("Audio format does not match"));
+    }
+
+    @Test
+    @DisplayName("Format Validation: Matching presentationFormatId and audioFormatId succeeds")
+    void testMatchingPresentationAndAudioFormatSucceeds() {
+        when(screenRepository.findByIdWithPessimisticLock(screenId)).thenReturn(Optional.of(screen));
+        when(movieLanguageRepository.findById(movieLanguageId)).thenReturn(Optional.of(movieLanguage));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+
+        validRequest.setPresentationFormatId(1L);
+        validRequest.setAudioFormatId(1L);
+
+        PresentationFormat pf = new PresentationFormat(1L, "2D", "Standard 2D", "2D");
+        AudioFormat af = new AudioFormat(1L, "5.1", "Dolby 5.1", "5.1");
+
+        when(presentationFormatRepository.findById(1L)).thenReturn(Optional.of(pf));
+        when(audioFormatRepository.findById(1L)).thenReturn(Optional.of(af));
+        when(showRepository.countOverlappingShows(eq(screenId), eq(startAt), eq(endAt))).thenReturn(0L);
+
+        Show savedShow = new Show();
+        savedShow.setShowId(888L);
+        savedShow.setMovieLanguageId(movieLanguageId);
+        savedShow.setScreenCapabilityId(screenCapabilityId);
+        savedShow.setStartAt(startAt);
+        savedShow.setEndAt(endAt);
+        when(showRepository.save(any(Show.class))).thenReturn(savedShow);
+
+        Seat seat1 = new Seat(screenId, 1L, "A", "1");
+        seat1.setSeatId(501L);
+        when(seatRepository.findByScreenIdAndIsActiveTrueOrderByRowLabelAscSeatNumberAsc(screenId))
+                .thenReturn(List.of(seat1));
+
+        ShowResponse resp = showSchedulingService.createShow(theatreId, validRequest, 1L, "127.0.0.1");
+        assertNotNull(resp);
+        assertEquals(888L, resp.getShowId());
+    }
+
+    @Test
+    @DisplayName("PATCH Timing: Independent startAt update retains existing endAt and enforces chronological order")
+    void testUpdateShowIndependentStartAt() {
+        Show existingShow = new Show();
+        existingShow.setShowId(10L);
+        existingShow.setScreenCapabilityId(screenCapabilityId);
+        existingShow.setScreenId(screenId);
+        existingShow.setStartAt(startAt);
+        existingShow.setEndAt(endAt);
+        existingShow.setStatus("SCHEDULED");
+
+        when(showRepository.findById(10L)).thenReturn(Optional.of(existingShow));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+        when(screenRepository.findById(screenId)).thenReturn(Optional.of(screen));
+
+        // Invalid: newStart is after existing endAt
+        ShowRequest reqInvalid = new ShowRequest();
+        reqInvalid.setStartAt(endAt.plus(10, ChronoUnit.MINUTES));
+        assertThrows(BadRequestException.class, () ->
+                showSchedulingService.updateShow(theatreId, 10L, reqInvalid, 1L, "127.0.0.1"));
+
+        // Valid: newStart is 30 minutes earlier
+        ShowRequest reqValid = new ShowRequest();
+        Instant newStart = startAt.minus(30, ChronoUnit.MINUTES);
+        reqValid.setStartAt(newStart);
+
+        when(showRepository.countOverlappingShowsExcluding(eq(screenId), eq(10L), eq(newStart), eq(endAt)))
+                .thenReturn(0L);
+        when(showRepository.save(any(Show.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ShowResponse resp = showSchedulingService.updateShow(theatreId, 10L, reqValid, 1L, "127.0.0.1");
+        assertNotNull(resp);
+        assertEquals(newStart, resp.getStartAt());
+        assertEquals(endAt, resp.getEndAt());
+    }
+
+    @Test
+    @DisplayName("PATCH Timing: Independent endAt update retains existing startAt and enforces chronological order")
+    void testUpdateShowIndependentEndAt() {
+        Show existingShow = new Show();
+        existingShow.setShowId(10L);
+        existingShow.setScreenCapabilityId(screenCapabilityId);
+        existingShow.setScreenId(screenId);
+        existingShow.setStartAt(startAt);
+        existingShow.setEndAt(endAt);
+        existingShow.setStatus("SCHEDULED");
+
+        when(showRepository.findById(10L)).thenReturn(Optional.of(existingShow));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+        when(screenRepository.findById(screenId)).thenReturn(Optional.of(screen));
+
+        // Invalid: newEnd is before existing startAt
+        ShowRequest reqInvalid = new ShowRequest();
+        reqInvalid.setEndAt(startAt.minus(10, ChronoUnit.MINUTES));
+        assertThrows(BadRequestException.class, () ->
+                showSchedulingService.updateShow(theatreId, 10L, reqInvalid, 1L, "127.0.0.1"));
+
+        // Valid: newEnd extended by 30 minutes
+        ShowRequest reqValid = new ShowRequest();
+        Instant newEnd = endAt.plus(30, ChronoUnit.MINUTES);
+        reqValid.setEndAt(newEnd);
+
+        when(showRepository.countOverlappingShowsExcluding(eq(screenId), eq(10L), eq(startAt), eq(newEnd)))
+                .thenReturn(0L);
+        when(showRepository.save(any(Show.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ShowResponse resp = showSchedulingService.updateShow(theatreId, 10L, reqValid, 1L, "127.0.0.1");
+        assertNotNull(resp);
+        assertEquals(startAt, resp.getStartAt());
+        assertEquals(newEnd, resp.getEndAt());
+    }
+
+    @Test
+    @DisplayName("PATCH Turnaround: Rejects update if insufficient turnaround buffer to adjacent show")
+    void testUpdateShowTurnaroundBufferViolation() {
+        Show existingShow = new Show();
+        existingShow.setShowId(10L);
+        existingShow.setScreenCapabilityId(screenCapabilityId);
+        existingShow.setScreenId(screenId);
+        existingShow.setStartAt(startAt);
+        existingShow.setEndAt(endAt);
+        existingShow.setStatus("SCHEDULED");
+
+        when(showRepository.findById(10L)).thenReturn(Optional.of(existingShow));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+        when(screenRepository.findById(screenId)).thenReturn(Optional.of(screen));
+
+        // Adjacent show on same screen starts only 10 minutes after updated endAt (less than 20m buffer)
+        Instant updatedEnd = endAt.plus(20, ChronoUnit.MINUTES);
+        ShowRequest req = new ShowRequest();
+        req.setEndAt(updatedEnd);
+
+        when(showRepository.countOverlappingShowsExcluding(eq(screenId), eq(10L), eq(startAt), eq(updatedEnd)))
+                .thenReturn(0L);
+
+        Show adjacentShow = new Show();
+        adjacentShow.setShowId(20L);
+        adjacentShow.setScreenCapabilityId(screenCapabilityId);
+        adjacentShow.setScreenId(screenId);
+        adjacentShow.setStartAt(updatedEnd.plus(10, ChronoUnit.MINUTES)); // Only 10m buffer!
+        adjacentShow.setEndAt(updatedEnd.plus(130, ChronoUnit.MINUTES));
+        adjacentShow.setStatus("SCHEDULED");
+
+        when(screenCapabilityRepository.findByScreenId(screenId)).thenReturn(List.of(capability));
+        when(showRepository.findByScreenCapabilityIdInAndStatusIn(anyList(), anyList()))
+                .thenReturn(List.of(existingShow, adjacentShow));
+
+        BadRequestException ex = assertThrows(BadRequestException.class, () ->
+                showSchedulingService.updateShow(theatreId, 10L, req, 1L, "127.0.0.1"));
+        assertTrue(ex.getMessage().contains("Insufficient turnaround buffer"));
+    }
+
+    @Test
+    @DisplayName("PATCH Conflict: Rejects update if new timing overlaps existing active show")
+    void testUpdateShowOverlapConflictRejected() {
+        Show existingShow = new Show();
+        existingShow.setShowId(10L);
+        existingShow.setScreenCapabilityId(screenCapabilityId);
+        existingShow.setScreenId(screenId);
+        existingShow.setStartAt(startAt);
+        existingShow.setEndAt(endAt);
+        existingShow.setStatus("SCHEDULED");
+
+        when(showRepository.findById(10L)).thenReturn(Optional.of(existingShow));
+        when(screenCapabilityRepository.findById(screenCapabilityId)).thenReturn(Optional.of(capability));
+        when(screenRepository.findById(screenId)).thenReturn(Optional.of(screen));
+
+        ShowRequest req = new ShowRequest();
+        req.setStartAt(startAt.plus(30, ChronoUnit.MINUTES));
+
+        // Overlap found
+        when(showRepository.countOverlappingShowsExcluding(eq(screenId), eq(10L), any(), any()))
+                .thenReturn(1L);
+
+        assertThrows(ShowOverlapException.class, () ->
+                showSchedulingService.updateShow(theatreId, 10L, req, 1L, "127.0.0.1"));
     }
 }

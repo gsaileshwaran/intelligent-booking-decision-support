@@ -27,6 +27,8 @@ spring:
     locations: classpath:db/migration
 
 app:
+  business-date: ${BUSINESS_DATE:2026-09-18}
+  demo-window-days: ${DEMO_WINDOW_DAYS:7}
   jwt:
     secret: ${JWT_SECRET:pvk-cinemas-super-secure-hmac-sha256-secret-key-for-jwt-tokens-2026!}
     expiration-minutes: 30

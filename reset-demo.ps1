@@ -50,43 +50,23 @@ foreach ($port in $ports) {
 Start-Sleep -Seconds 2
 Write-Host "  [+] Services stopped" -ForegroundColor Green
 
-# ---- Step 2: Reset Flyway schema history ----
+# ---- Step 2: Safe demo data reset (Phase 1 master data) ----
 if (-not $SkipDataReset) {
     Write-Host ""
-    Write-Host "[2/5] Resetting Flyway migration history..." -ForegroundColor Yellow
+    Write-Host "[2/5] Resetting demo data (Phase 1 deterministic reset)..." -ForegroundColor Yellow
     
-    $resetSuccess = $false
-    # Method A: Python helper script
-    $pyScript = Join-Path $ROOT "database\reset_flyway_v3.py"
+    $pyScript = Join-Path $ROOT "database\phase1_reset.py"
     if (Test-Path $pyScript) {
-        $res = python $pyScript 2>$null
-        if ($res -match "FLYWAY_V3_RESET_OK") {
-            Write-Host "  [+] Flyway history reset via Python/PyMySQL" -ForegroundColor Green
-            $resetSuccess = $true
+        $envFile = Join-Path $ROOT ".env"
+        $res = python $pyScript --env-file "$envFile" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  [+] Demo master data safely restored without touching Flyway history" -ForegroundColor Green
+        } else {
+            Write-Host "  [!] phase1_reset.py returned exit code $LASTEXITCODE" -ForegroundColor Yellow
+            Write-Host "$res" -ForegroundColor Gray
         }
-    }
-
-    # Method B: Fallback to mysql binary if Python failed
-    if (-not $resetSuccess) {
-        $mysqlPaths = @(
-            "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
-            "C:\xampp\mysql\bin\mysql.exe",
-            "C:\laragon\bin\mysql\mysql-8.0\bin\mysql.exe"
-        )
-        $mysqlBin = $mysqlPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-        $resetSql = "DELETE FROM flyway_schema_history WHERE version = '3';"
-        if ($mysqlBin) {
-            & $mysqlBin -u root -proot pvk_cinemas_db -e $resetSql 2>&1 | Out-Null
-            Write-Host "  [+] Flyway history reset via $mysqlBin" -ForegroundColor Green
-            $resetSuccess = $true
-        }
-    }
-
-    # Ensure target/classes has the latest V3 file
-    $v3Src = Join-Path $ROOT "backend\src\main\resources\db\migration\V3__demo_realistic_seed.sql"
-    $v3Dst = Join-Path $ROOT "backend\target\classes\db\migration\V3__demo_realistic_seed.sql"
-    if ((Test-Path $v3Src) -and (Test-Path (Split-Path -Parent $v3Dst))) {
-        Copy-Item $v3Src $v3Dst -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "  [!] phase1_reset.py not found at $pyScript" -ForegroundColor Yellow
     }
 } else {
     Write-Host ""

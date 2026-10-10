@@ -16,6 +16,11 @@ public class MovieResponse {
     private String movieStatus;
     private List<String> genres;
     private List<String> languages;
+    private String demandTier;
+    private java.math.BigDecimal popularityScore;
+    private LocalDate exhibitionStartDate;
+    private LocalDate exhibitionEndDate;
+    private String lifecycleStage;
 
     public MovieResponse() {}
 
@@ -55,4 +60,19 @@ public class MovieResponse {
 
     public List<String> getLanguages() { return languages; }
     public void setLanguages(List<String> languages) { this.languages = languages; }
+
+    public String getDemandTier() { return demandTier; }
+    public void setDemandTier(String demandTier) { this.demandTier = demandTier; }
+
+    public java.math.BigDecimal getPopularityScore() { return popularityScore; }
+    public void setPopularityScore(java.math.BigDecimal popularityScore) { this.popularityScore = popularityScore; }
+
+    public LocalDate getExhibitionStartDate() { return exhibitionStartDate; }
+    public void setExhibitionStartDate(LocalDate exhibitionStartDate) { this.exhibitionStartDate = exhibitionStartDate; }
+
+    public LocalDate getExhibitionEndDate() { return exhibitionEndDate; }
+    public void setExhibitionEndDate(LocalDate exhibitionEndDate) { this.exhibitionEndDate = exhibitionEndDate; }
+
+    public String getLifecycleStage() { return lifecycleStage; }
+    public void setLifecycleStage(String lifecycleStage) { this.lifecycleStage = lifecycleStage; }
 }

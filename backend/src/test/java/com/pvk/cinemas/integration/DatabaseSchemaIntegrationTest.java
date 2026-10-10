@@ -262,7 +262,7 @@ class DatabaseSchemaIntegrationTest {
         // 3. Setup Show
         Instant start = Instant.now().plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
         Instant end = start.plus(2, ChronoUnit.HOURS);
-        Show show = new Show(ml.getMovieLanguageId(), cap.getScreenCapabilityId(), start, end, "SCHEDULED");
+        Show show = new Show(ml.getMovieLanguageId(), screen.getScreenId(), cap.getScreenCapabilityId(), start, end, "SCHEDULED");
         show = showRepository.save(show);
         assertNotNull(show.getShowId());
         assertEquals("SCHEDULED", show.getShowStatus());

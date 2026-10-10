@@ -10,5 +10,6 @@ import java.util.Optional;
 @Repository
 public interface MovieLanguageRepository extends JpaRepository<MovieLanguage, Long> {
     List<MovieLanguage> findByMovieId(Long movieId);
+    List<MovieLanguage> findByLanguageId(Long languageId);
     Optional<MovieLanguage> findByMovieIdAndLanguageIdAndLanguageRole(Long movieId, Integer languageId, String languageRole);
 }

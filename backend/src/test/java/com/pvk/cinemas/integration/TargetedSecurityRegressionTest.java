@@ -183,6 +183,7 @@ public class TargetedSecurityRegressionTest {
         // 5. Shows
         Instant now = Instant.now().plus(2, ChronoUnit.HOURS);
         showA = new Show();
+        showA.setScreenId(screenA.getScreenId());
         showA.setScreenCapabilityId(capA.getScreenCapabilityId());
         showA.setMovieLanguageId(ml.getMovieLanguageId());
         showA.setStartAt(now);
@@ -192,6 +193,7 @@ public class TargetedSecurityRegressionTest {
 
         Instant nowB = Instant.now().plus(5, ChronoUnit.HOURS);
         showB = new Show();
+        showB.setScreenId(screenB.getScreenId());
         showB.setScreenCapabilityId(capB.getScreenCapabilityId());
         showB.setMovieLanguageId(ml.getMovieLanguageId());
         showB.setStartAt(nowB);

@@ -25,6 +25,15 @@ public class Screen {
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
+    // -------------------------------------------------------------------------
+    // Part 3: Premium Screen Indicator (V10 column)
+    // TRUE for IMAX, 4DX, Dolby Cinema screens → triggers dedicated-screen logic.
+    // All existing screens default to FALSE. V11 will mark premium screens.
+    // -------------------------------------------------------------------------
+
+    @Column(name = "is_premium", nullable = false)
+    private Boolean isPremium = false;
+
     public Screen() {}
 
     public Screen(Long theatreId, String screenCode, String screenName) {
@@ -60,4 +69,8 @@ public class Screen {
 
     public Boolean getIsActive() { return "ACTIVE".equalsIgnoreCase(this.status); }
     public void setIsActive(Boolean active) { this.status = (active != null && active) ? "ACTIVE" : "INACTIVE"; }
+
+    // Part 3 getter/setter
+    public Boolean getIsPremium() { return isPremium != null && isPremium; }
+    public void setIsPremium(Boolean isPremium) { this.isPremium = isPremium != null && isPremium; }
 }

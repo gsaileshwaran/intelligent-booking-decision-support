@@ -27,8 +27,13 @@ public class CityController {
         return ResponseEntity.ok(ApiResponse.ok(cityService.getAllCities()));
     }
 
+    @GetMapping("/{cityId}")
+    public ResponseEntity<ApiResponse<CityResponse>> getCityById(@PathVariable Long cityId) {
+        return ResponseEntity.ok(ApiResponse.ok(cityService.getCityById(cityId)));
+    }
+
     @GetMapping("/{cityId}/theatres")
-    public ResponseEntity<ApiResponse<List<TheatreResponse>>> getTheatresByCity(@PathVariable Integer cityId) {
+    public ResponseEntity<ApiResponse<List<TheatreResponse>>> getTheatresByCity(@PathVariable Long cityId) {
         return ResponseEntity.ok(ApiResponse.ok(theatreService.getTheatresByCity(cityId)));
     }
 }

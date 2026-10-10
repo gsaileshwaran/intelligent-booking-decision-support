@@ -1,6 +1,7 @@
 package com.pvk.cinemas.catalogue.model;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -39,6 +40,23 @@ public class Movie {
 
     @Column(name = "status", nullable = false, length = 20)
     private String status = "UPCOMING";
+
+    // -------------------------------------------------------------------------
+    // Part 2: Movie Lifecycle & Demand Classification (V10 columns)
+    // All nullable until V12 (Part 2 catalogue migration) populates them.
+    // -------------------------------------------------------------------------
+
+    @Column(name = "demand_tier", length = 20)
+    private String demandTier;
+
+    @Column(name = "popularity_score", precision = 5, scale = 2)
+    private BigDecimal popularityScore;
+
+    @Column(name = "exhibition_start_date")
+    private LocalDate exhibitionStartDate;
+
+    @Column(name = "exhibition_end_date")
+    private LocalDate exhibitionEndDate;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -82,6 +100,19 @@ public class Movie {
 
     public String getMovieStatus() { return status; }
     public void setMovieStatus(String movieStatus) { this.status = movieStatus; }
+
+    // Part 2 getters/setters
+    public String getDemandTier() { return demandTier; }
+    public void setDemandTier(String demandTier) { this.demandTier = demandTier; }
+
+    public BigDecimal getPopularityScore() { return popularityScore; }
+    public void setPopularityScore(BigDecimal popularityScore) { this.popularityScore = popularityScore; }
+
+    public LocalDate getExhibitionStartDate() { return exhibitionStartDate; }
+    public void setExhibitionStartDate(LocalDate exhibitionStartDate) { this.exhibitionStartDate = exhibitionStartDate; }
+
+    public LocalDate getExhibitionEndDate() { return exhibitionEndDate; }
+    public void setExhibitionEndDate(LocalDate exhibitionEndDate) { this.exhibitionEndDate = exhibitionEndDate; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

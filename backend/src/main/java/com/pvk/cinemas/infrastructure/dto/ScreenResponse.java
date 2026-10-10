@@ -7,6 +7,8 @@ public class ScreenResponse {
     private String screenName;
     private Boolean isActive;
     private Long screenCapabilityId;
+    private Integer totalCapacity;
+    private java.util.List<ScreenCapabilityResponse> capabilities = new java.util.ArrayList<>();
 
     public ScreenResponse() {}
 
@@ -42,4 +44,10 @@ public class ScreenResponse {
     public Long getScreenCapabilityId() { return screenCapabilityId; }
     public void setScreenCapabilityId(Long screenCapabilityId) { this.screenCapabilityId = screenCapabilityId; }
     public void setScreenCapabilityId(Integer screenCapabilityId) { this.screenCapabilityId = screenCapabilityId != null ? screenCapabilityId.longValue() : null; }
+
+    public Integer getTotalCapacity() { return totalCapacity; }
+    public void setTotalCapacity(Integer totalCapacity) { this.totalCapacity = totalCapacity; }
+
+    public java.util.List<ScreenCapabilityResponse> getCapabilities() { return capabilities; }
+    public void setCapabilities(java.util.List<ScreenCapabilityResponse> capabilities) { this.capabilities = capabilities != null ? capabilities : new java.util.ArrayList<>(); }
 }

@@ -41,6 +41,10 @@ public class SeatAvailabilityService {
     private final SeatTypeRepository seatTypeRepository;
     private final AuditLogService auditLogService;
     private final SeatPricingService seatPricingService;
+    private final com.pvk.cinemas.catalogue.repository.MovieRepository movieRepository;
+    private final com.pvk.cinemas.catalogue.repository.MovieLanguageRepository movieLanguageRepository;
+    private final com.pvk.cinemas.catalogue.service.MovieLifecycleService movieLifecycleService;
+    private final com.pvk.cinemas.scheduling.service.DeterministicInventoryEngine deterministicInventoryEngine;
 
     public SeatAvailabilityService(ShowRepository showRepository,
                                    ShowSeatRepository showSeatRepository,
@@ -50,7 +54,11 @@ public class SeatAvailabilityService {
                                    SeatRepository seatRepository,
                                    SeatTypeRepository seatTypeRepository,
                                    AuditLogService auditLogService,
-                                   SeatPricingService seatPricingService) {
+                                   SeatPricingService seatPricingService,
+                                   com.pvk.cinemas.catalogue.repository.MovieRepository movieRepository,
+                                   com.pvk.cinemas.catalogue.repository.MovieLanguageRepository movieLanguageRepository,
+                                   com.pvk.cinemas.catalogue.service.MovieLifecycleService movieLifecycleService,
+                                   com.pvk.cinemas.scheduling.service.DeterministicInventoryEngine deterministicInventoryEngine) {
         this.showRepository = showRepository;
         this.showSeatRepository = showSeatRepository;
         this.screenCapabilityRepository = screenCapabilityRepository;
@@ -60,13 +68,17 @@ public class SeatAvailabilityService {
         this.seatTypeRepository = seatTypeRepository;
         this.auditLogService = auditLogService;
         this.seatPricingService = seatPricingService;
+        this.movieRepository = movieRepository;
+        this.movieLanguageRepository = movieLanguageRepository;
+        this.movieLifecycleService = movieLifecycleService;
+        this.deterministicInventoryEngine = deterministicInventoryEngine;
     }
 
     /**
-     * CHANGE-API-004 / DECISION-007:
-     * Public display-only seat availability viewer.
+     * CHANGE-API-004 / DECISION-007 / PART 3 (§8.2):
+     * Seat availability viewer with Just-In-Time (JIT) materialization for advance schedules.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public ShowSeatAvailabilityResponse getShowSeatAvailability(Long showId) {
         Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
@@ -81,6 +93,9 @@ public class SeatAvailabilityService {
                 .orElseThrow(() -> new ResourceNotFoundException("Theatre not found: " + screen.getTheatreId()));
 
         List<ShowSeat> showSeats = showSeatRepository.findByIdShowId(showId);
+        if (showSeats.isEmpty()) {
+            showSeats = materializeShowSeatsJit(show, screen, theatre);
+        }
         List<Long> seatIds = showSeats.stream().map(ss -> ss.getId().getSeatId()).toList();
         Map<Long, Seat> seatMap = seatRepository.findAllById(seatIds).stream()
                 .collect(Collectors.toMap(Seat::getSeatId, Function.identity()));
@@ -164,5 +179,54 @@ public class SeatAvailabilityService {
                 "Overrode " + request.getSeatIds().size() + " seats to status " + newStatus, ipAddress);
 
         return getShowSeatAvailability(showId);
+    }
+
+    /**
+     * Just-In-Time (JIT) materialization for advance schedules (§8.2).
+     * Invokes canonical pure functions F and G to generate deterministic SHOW_SEAT rows.
+     */
+    @Transactional
+    public List<ShowSeat> materializeShowSeatsJit(Show show, Screen screen, Theatre theatre) {
+        List<Seat> physicalSeats = seatRepository.findByScreenIdAndIsActiveTrueOrderByRowLabelAscSeatNumberAsc(screen.getScreenId());
+        if (physicalSeats.isEmpty()) {
+            physicalSeats = seatRepository.findByScreenId(screen.getScreenId());
+        }
+        if (physicalSeats.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+
+        if (deterministicInventoryEngine != null && movieLanguageRepository != null && movieRepository != null && movieLifecycleService != null) {
+            var mlOpt = movieLanguageRepository.findById(show.getMovieLanguageId());
+            if (mlOpt.isPresent()) {
+                var movieOpt = movieRepository.findById(mlOpt.get().getMovieId());
+                if (movieOpt.isPresent()) {
+                    var movie = movieOpt.get();
+                    java.time.LocalDate sDate = show.getShowDate();
+                    java.time.DayOfWeek dow = sDate != null ? sDate.getDayOfWeek() : java.time.DayOfWeek.FRIDAY;
+                    String dayType = (dow == java.time.DayOfWeek.FRIDAY || dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY)
+                            ? "WEEKEND" : "WEEKDAY";
+                    double rho = movieLifecycleService.calculateRho(movie.getExhibitionStartDate(), movie.getExhibitionEndDate(), sDate);
+                    List<ShowSeat> generated = deterministicInventoryEngine.generateShowSeats(
+                            show.getShowId(),
+                            sDate,
+                            physicalSeats,
+                            movie.getDemandTier(),
+                            movie.getPopularityScore(),
+                            rho,
+                            dayType,
+                            theatre.getTheatreTier()
+                    );
+                    return showSeatRepository.saveAll(generated);
+                }
+            }
+        }
+
+        List<ShowSeat> fallbackSeats = new ArrayList<>(physicalSeats.size());
+        for (Seat seat : physicalSeats) {
+            String status = ("BLOCKED".equalsIgnoreCase(seat.getStatus()) || "INACTIVE".equalsIgnoreCase(seat.getStatus()))
+                    ? "BLOCKED" : "AVAILABLE";
+            fallbackSeats.add(new ShowSeat(show.getShowId(), seat.getSeatId(), status));
+        }
+        return showSeatRepository.saveAll(fallbackSeats);
     }
 }

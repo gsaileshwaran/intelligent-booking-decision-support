@@ -3,6 +3,7 @@ package com.pvk.cinemas.organization.model;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalTime;
 
 @Entity
 @Table(name = "theatre")
@@ -42,6 +43,22 @@ public class Theatre {
 
     @Column(name = "base_price_offset", precision = 10, scale = 2)
     private BigDecimal basePriceOffset = BigDecimal.ZERO;
+
+    // -------------------------------------------------------------------------
+    // Part 3: Operating Hours and Venue Classification (V10 columns)
+    // All nullable until V11 (Part 1A dataset migration) populates them.
+    // opening_time and closing_time are stored in Asia/Kolkata (IST).
+    // When closing_time < opening_time, the operating window extends overnight.
+    // -------------------------------------------------------------------------
+
+    @Column(name = "theatre_tier", length = 20)
+    private String theatreTier;
+
+    @Column(name = "opening_time")
+    private LocalTime openingTime;
+
+    @Column(name = "closing_time")
+    private LocalTime closingTime;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -94,4 +111,14 @@ public class Theatre {
 
     public BigDecimal getBasePriceOffset() { return basePriceOffset != null ? basePriceOffset : BigDecimal.ZERO; }
     public void setBasePriceOffset(BigDecimal basePriceOffset) { this.basePriceOffset = basePriceOffset; }
+
+    // Part 3 getters/setters
+    public String getTheatreTier() { return theatreTier; }
+    public void setTheatreTier(String theatreTier) { this.theatreTier = theatreTier; }
+
+    public LocalTime getOpeningTime() { return openingTime; }
+    public void setOpeningTime(LocalTime openingTime) { this.openingTime = openingTime; }
+
+    public LocalTime getClosingTime() { return closingTime; }
+    public void setClosingTime(LocalTime closingTime) { this.closingTime = closingTime; }
 }

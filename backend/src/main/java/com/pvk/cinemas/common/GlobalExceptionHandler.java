@@ -55,6 +55,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(err);
     }
 
+    @ExceptionHandler(OutOfCalendarRangeException.class)
+    public ResponseEntity<ErrorResponse> handleOutOfCalendarRange(OutOfCalendarRangeException ex, HttpServletRequest request) {
+        String traceId = UUID.randomUUID().toString();
+        ErrorResponse err = new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "OUT_OF_CALENDAR_RANGE",
+                ex.getMessage(),
+                request.getRequestURI(),
+                traceId
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(err);
+    }
+
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ErrorResponse> handleBadRequest(BadRequestException ex, HttpServletRequest request) {
         String traceId = UUID.randomUUID().toString();

@@ -39,6 +39,39 @@ class BookingDateIntegrityIntegrationTest {
     @Autowired
     private ShowSeatRepository showSeatRepository;
 
+    @Autowired
+    private com.pvk.cinemas.scheduling.repository.ScreenCapabilityRepository screenCapabilityRepository;
+
+    @Autowired
+    private com.pvk.cinemas.infrastructure.repository.SeatRepository seatRepository;
+
+    @Autowired
+    private com.pvk.cinemas.catalogue.repository.MovieLanguageRepository movieLanguageRepository;
+
+    @org.junit.jupiter.api.BeforeEach
+    void ensureTestShowsExist() {
+        boolean hasPast = showRepository.findAll().stream()
+                .anyMatch(s -> s.getStartAt() != null && s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(LocalDate.of(2026, 9, 17)));
+        if (!hasPast) {
+            com.pvk.cinemas.scheduling.model.ScreenCapability cap = screenCapabilityRepository.findAll().stream().findFirst().orElseThrow();
+            com.pvk.cinemas.catalogue.model.MovieLanguage ml = movieLanguageRepository.findAll().stream().findFirst().orElseThrow();
+            List<com.pvk.cinemas.infrastructure.model.Seat> seats = seatRepository.findByScreenId(cap.getScreenId());
+            if (seats.isEmpty()) return;
+
+            LocalDate[] dates = new LocalDate[]{LocalDate.of(2026, 9, 17), LocalDate.of(2026, 9, 18), LocalDate.of(2026, 9, 19)};
+            for (LocalDate d : dates) {
+                java.time.Instant start = d.atTime(18, 0).atZone(IST_ZONE).toInstant();
+                java.time.Instant end = d.atTime(21, 0).atZone(IST_ZONE).toInstant();
+                Show show = new Show(ml.getMovieLanguageId(), cap.getScreenId(), cap.getScreenCapabilityId(), start, end, "SCHEDULED");
+                show = showRepository.save(show);
+
+                for (com.pvk.cinemas.infrastructure.model.Seat seat : seats) {
+                    showSeatRepository.save(new ShowSeat(show.getShowId(), seat.getSeatId(), "AVAILABLE"));
+                }
+            }
+        }
+    }
+
     @Test
     @DisplayName("BusinessDateProvider is authoritative and configured for 2026-09-18")
     void verifyAuthoritativeBusinessDate() {

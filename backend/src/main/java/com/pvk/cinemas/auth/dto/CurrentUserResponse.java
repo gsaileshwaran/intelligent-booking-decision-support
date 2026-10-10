@@ -15,6 +15,8 @@ public class CurrentUserResponse {
     private String accountStatus;
     private List<String> roles;
     private List<String> permissions;
+    private String employeeCode;
+    private List<Long> assignedTheatreIds;
 
     public CurrentUserResponse() {}
 
@@ -52,4 +54,10 @@ public class CurrentUserResponse {
 
     public List<String> getPermissions() { return permissions; }
     public void setPermissions(List<String> permissions) { this.permissions = permissions; }
+
+    public String getEmployeeCode() { return employeeCode; }
+    public void setEmployeeCode(String employeeCode) { this.employeeCode = employeeCode; }
+
+    public List<Long> getAssignedTheatreIds() { return assignedTheatreIds; }
+    public void setAssignedTheatreIds(List<Long> assignedTheatreIds) { this.assignedTheatreIds = assignedTheatreIds; }
 }

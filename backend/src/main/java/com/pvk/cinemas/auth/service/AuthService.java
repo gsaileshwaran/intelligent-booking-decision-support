@@ -72,6 +72,20 @@ public class AuthService {
         this.auditLogService = auditLogService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.pvk.cinemas.user.repository.EmployeeProfileRepository employeeProfileRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.pvk.cinemas.organization.repository.EmployeeTheatreRepository employeeTheatreRepository;
+
+    public void setEmployeeProfileRepository(com.pvk.cinemas.user.repository.EmployeeProfileRepository employeeProfileRepository) {
+        this.employeeProfileRepository = employeeProfileRepository;
+    }
+
+    public void setEmployeeTheatreRepository(com.pvk.cinemas.organization.repository.EmployeeTheatreRepository employeeTheatreRepository) {
+        this.employeeTheatreRepository = employeeTheatreRepository;
+    }
+
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
@@ -112,10 +126,24 @@ public class AuthService {
         // 4. Emit Audit Log
         auditLogService.logAction(user.getUserId(), "AUTH_REGISTER", "USER", user.getUserId(), null, "{\"email\":\"" + user.getEmail() + "\"}");
 
-        // 5. Generate Token
-        String token = jwtTokenProvider.generateToken(user.getUserId(), user.getEmail(), List.of("CUSTOMER"));
+        // Resolve customer permissions
+        List<String> permissions = new ArrayList<>();
+        List<RolePermission> rps = rolePermissionRepository.findByIdRoleId(customerRole.getRoleId());
+        for (RolePermission rp : rps) {
+            permissionRepository.findById(rp.getId().getPermissionId()).ifPresent(p -> {
+                permissions.add(p.getPermissionCode());
+            });
+        }
 
-        return new AuthResponse(
+        // 5. Generate Token
+        String token;
+        if (permissions.isEmpty()) {
+            token = jwtTokenProvider.generateToken(user.getUserId(), user.getEmail(), List.of("CUSTOMER"));
+        } else {
+            token = jwtTokenProvider.generateToken(user.getUserId(), user.getEmail(), List.of("CUSTOMER"), permissions, List.of());
+        }
+
+        AuthResponse regResp = new AuthResponse(
                 user.getUserId(),
                 user.getEmail(),
                 user.getFirstName(),
@@ -123,6 +151,8 @@ public class AuthService {
                 "CUSTOMER",
                 token
         );
+        regResp.setPermissions(permissions);
+        return regResp;
     }
 
     @Transactional
@@ -149,8 +179,8 @@ public class AuthService {
         for (UserRole ur : userRoles) {
             roleRepository.findById(ur.getId().getRoleId()).ifPresent(r -> {
                 roleCodes.add(r.getRoleCode());
-                List<RolePermission> rps = rolePermissionRepository.findByIdRoleId(r.getRoleId());
-                for (RolePermission rp : rps) {
+                List<RolePermission> userRps = rolePermissionRepository.findByIdRoleId(r.getRoleId());
+                for (RolePermission rp : userRps) {
                     permissionRepository.findById(rp.getId().getPermissionId()).ifPresent(p -> {
                         if (!permissions.contains(p.getPermissionCode())) {
                             permissions.add(p.getPermissionCode());
@@ -160,8 +190,22 @@ public class AuthService {
             });
         }
 
+        List<Long> assignedTheatreIds = new ArrayList<>();
+        if (employeeTheatreRepository != null) {
+            assignedTheatreIds = employeeTheatreRepository.findByIdUserId(user.getUserId()).stream()
+                    .filter(et -> "ACTIVE".equalsIgnoreCase(et.getStatus()))
+                    .map(et -> et.getId().getTheatreId())
+                    .filter(java.util.Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toList());
+        }
+
         String primaryRole = roleCodes.isEmpty() ? "CUSTOMER" : roleCodes.get(0);
-        String token = jwtTokenProvider.generateToken(user.getUserId(), user.getEmail(), roleCodes);
+        String token;
+        if (permissions.isEmpty() && assignedTheatreIds.isEmpty()) {
+            token = jwtTokenProvider.generateToken(user.getUserId(), user.getEmail(), roleCodes);
+        } else {
+            token = jwtTokenProvider.generateToken(user.getUserId(), user.getEmail(), roleCodes, permissions, assignedTheatreIds);
+        }
 
         // Emit Audit Log
         auditLogService.logAction(user.getUserId(), "AUTH_LOGIN", "USER", user.getUserId(), null, "{\"email\":\"" + user.getEmail() + "\"}");
@@ -216,7 +260,23 @@ public class AuthService {
             });
         }
 
-        return new CurrentUserResponse(
+        String employeeCode = null;
+        if (employeeProfileRepository != null) {
+            employeeCode = employeeProfileRepository.findByUserId(user.getUserId())
+                    .map(com.pvk.cinemas.user.model.EmployeeProfile::getEmployeeCode)
+                    .orElse(null);
+        }
+
+        List<Long> assignedTheatreIds = new ArrayList<>();
+        if (employeeTheatreRepository != null) {
+            assignedTheatreIds = employeeTheatreRepository.findByIdUserId(user.getUserId()).stream()
+                    .filter(et -> "ACTIVE".equalsIgnoreCase(et.getStatus()))
+                    .map(et -> et.getId().getTheatreId())
+                    .filter(java.util.Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toList());
+        }
+
+        CurrentUserResponse cur = new CurrentUserResponse(
                 user.getUserId(),
                 user.getEmail(),
                 user.getFirstName(),
@@ -226,5 +286,8 @@ public class AuthService {
                 roleCodes,
                 permissions
         );
+        cur.setEmployeeCode(employeeCode);
+        cur.setAssignedTheatreIds(assignedTheatreIds);
+        return cur;
     }
 }

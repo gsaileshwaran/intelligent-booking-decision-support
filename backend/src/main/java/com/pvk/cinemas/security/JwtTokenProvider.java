@@ -11,9 +11,11 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Component
 public class JwtTokenProvider {
@@ -29,6 +31,14 @@ public class JwtTokenProvider {
     }
 
     public String generateToken(Long userId, String email, List<String> roles) {
+        return generateToken(userId, email, roles, Collections.emptyList(), Collections.emptyList());
+    }
+
+    public String generateToken(Long userId, String email, List<String> roles, List<String> permissions) {
+        return generateToken(userId, email, roles, permissions, Collections.emptyList());
+    }
+
+    public String generateToken(Long userId, String email, List<String> roles, List<String> permissions, List<Long> assignedTheatreIds) {
         Instant now = Instant.now();
         Instant expiry = now.plus(expirationMinutes, ChronoUnit.MINUTES);
         String jti = UUID.randomUUID().toString();
@@ -37,7 +47,9 @@ public class JwtTokenProvider {
                 .subject(String.valueOf(userId))
                 .id(jti)
                 .claim("email", email)
-                .claim("roles", roles)
+                .claim("roles", roles != null ? roles : Collections.emptyList())
+                .claim("permissions", permissions != null ? permissions : Collections.emptyList())
+                .claim("theatres", assignedTheatreIds != null ? assignedTheatreIds : Collections.emptyList())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(key)
@@ -68,6 +80,22 @@ public class JwtTokenProvider {
     @SuppressWarnings("unchecked")
     public List<String> getRoles(String token) {
         return getClaims(token).get("roles", List.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<String> getPermissions(String token) {
+        List<?> raw = getClaims(token).get("permissions", List.class);
+        if (raw == null) return Collections.emptyList();
+        return raw.stream().map(Object::toString).collect(Collectors.toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Long> getAssignedTheatreIds(String token) {
+        List<?> raw = getClaims(token).get("theatres", List.class);
+        if (raw == null) return Collections.emptyList();
+        return raw.stream()
+                .map(item -> ((Number) item).longValue())
+                .collect(Collectors.toList());
     }
 
     public String getJti(String token) {

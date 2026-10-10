@@ -29,6 +29,9 @@ public class SeatService {
     private final BookingRepository bookingRepository;
     private final BookingSeatRepository bookingSeatRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.pvk.cinemas.security.TheatreScopeService theatreScopeService;
+
     public SeatService(SeatRepository seatRepository,
                        SeatTypeRepository seatTypeRepository,
                        ScreenRepository screenRepository,
@@ -43,16 +46,26 @@ public class SeatService {
         this.bookingSeatRepository = bookingSeatRepository;
     }
 
+    public void setTheatreScopeService(com.pvk.cinemas.security.TheatreScopeService theatreScopeService) {
+        this.theatreScopeService = theatreScopeService;
+    }
+
     /**
      * Returns ALL physical seats on a screen (including BLOCKED ones) — used by the manager's
      * screen-wise seat management view. Customers use the show-availability endpoint which
      * applies the ACTIVE-only filter and the physical block override.
      */
     @Transactional(readOnly = true)
-    public List<SeatResponse> getSeatsByScreen(Integer screenId) {
+    public List<SeatResponse> getSeatsByScreen(Long screenId) {
+        if (screenId == null) {
+            throw new ResourceNotFoundException("Screen not found: null");
+        }
+        if (theatreScopeService != null) {
+            theatreScopeService.checkScreenScope(screenId);
+        }
         screenRepository.findById(screenId)
                 .orElseThrow(() -> new ResourceNotFoundException("Screen not found: " + screenId));
-        return seatRepository.findByScreenId(screenId.longValue()).stream()
+        return seatRepository.findByScreenId(screenId).stream()
                 .sorted((a, b) -> {
                     int rowCmp = a.getRowLabel().compareTo(b.getRowLabel());
                     if (rowCmp != 0) return rowCmp;
@@ -66,8 +79,19 @@ public class SeatService {
                 .map(this::mapToResponse).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<SeatResponse> getSeatsByScreen(Integer screenId) {
+        return getSeatsByScreen(screenId != null ? screenId.longValue() : null);
+    }
+
     @Transactional
-    public SeatResponse createSeat(Integer screenId, SeatRequest request, Long actorUserId, String ipAddress) {
+    public SeatResponse createSeat(Long screenId, SeatRequest request, Long actorUserId, String ipAddress) {
+        if (screenId == null) {
+            throw new ResourceNotFoundException("Screen not found: null");
+        }
+        if (theatreScopeService != null) {
+            theatreScopeService.checkScreenScope(screenId);
+        }
         screenRepository.findById(screenId)
                 .orElseThrow(() -> new ResourceNotFoundException("Screen not found: " + screenId));
         seatTypeRepository.findById(request.getSeatTypeId())
@@ -83,6 +107,14 @@ public class SeatService {
         seat.setSeatNumber(request.getSeatNumber().trim());
         seat.setGridRowIndex(request.getGridRowIndex());
         seat.setGridColIndex(request.getGridColIndex());
+        if (request.getPositionX() != null) seat.setPositionX(request.getPositionX());
+        if (request.getPositionY() != null) seat.setPositionY(request.getPositionY());
+        if (request.getPricingZone() != null && !request.getPricingZone().isBlank()) {
+            seat.setPricingZone(request.getPricingZone().trim().toUpperCase());
+        }
+        if (request.getAisleAfter() != null) {
+            seat.setAisleAfter(request.getAisleAfter());
+        }
         // Resolve physical status: prefer explicit status field, else fall back to isActive
         String resolvedStatus = resolveStatus(request);
         seat.setStatus(resolvedStatus);
@@ -93,11 +125,26 @@ public class SeatService {
     }
 
     @Transactional
-    public SeatResponse updateSeat(Integer screenId, Long seatId, SeatRequest request, Long actorUserId, String ipAddress) {
+    public SeatResponse createSeat(Integer screenId, SeatRequest request, Long actorUserId, String ipAddress) {
+        return createSeat(screenId != null ? screenId.longValue() : null, request, actorUserId, ipAddress);
+    }
+
+    @Transactional
+    public SeatResponse updateSeat(Long screenId, Long seatId, SeatRequest request, Long actorUserId, String ipAddress) {
+        if (seatId == null) {
+            throw new ResourceNotFoundException("Seat not found: null");
+        }
+        if (theatreScopeService != null) {
+            if (screenId != null) {
+                theatreScopeService.checkScreenScope(screenId);
+            } else {
+                theatreScopeService.checkSeatScope(seatId);
+            }
+        }
         Seat seat = seatRepository.findById(seatId)
                 .orElseThrow(() -> new ResourceNotFoundException("Seat not found: " + seatId));
 
-        if (screenId != null && !seat.getScreenId().equals(screenId.longValue())) {
+        if (screenId != null && !seat.getScreenId().equals(screenId)) {
             throw new AccessDeniedException("Seat does not belong to specified screen");
         }
 
@@ -108,6 +155,30 @@ public class SeatService {
         }
         if (request.getGridRowIndex() != null) seat.setGridRowIndex(request.getGridRowIndex());
         if (request.getGridColIndex() != null) seat.setGridColIndex(request.getGridColIndex());
+        if (request.getPositionX() != null) seat.setPositionX(request.getPositionX());
+        if (request.getPositionY() != null) seat.setPositionY(request.getPositionY());
+        if (request.getPricingZone() != null && !request.getPricingZone().isBlank()) {
+            seat.setPricingZone(request.getPricingZone().trim().toUpperCase());
+        }
+        if (request.getAisleAfter() != null) {
+            seat.setAisleAfter(request.getAisleAfter());
+        }
+
+        // Coordinate check if rowLabel or seatNumber changed
+        boolean rowChanged = request.getRowLabel() != null && !request.getRowLabel().trim().equalsIgnoreCase(seat.getRowLabel());
+        boolean numChanged = request.getSeatNumber() != null && !request.getSeatNumber().trim().equalsIgnoreCase(seat.getSeatNumber());
+        if (rowChanged || numChanged) {
+            String targetRow = request.getRowLabel() != null ? request.getRowLabel().trim() : seat.getRowLabel();
+            String targetNum = request.getSeatNumber() != null ? request.getSeatNumber().trim() : seat.getSeatNumber();
+            seatRepository.findByScreenIdAndRowLabelAndSeatNumber(seat.getScreenId(), targetRow, targetNum)
+                    .ifPresent(existing -> {
+                        if (!existing.getSeatId().equals(seatId)) {
+                            throw new ConflictException("Seat coordinate already exists on screen: " + targetRow + targetNum);
+                        }
+                    });
+            seat.setRowLabel(targetRow);
+            seat.setSeatNumber(targetNum);
+        }
 
         // Resolve physical status: prefer explicit status field, else fall back to isActive
         String prevStatus = seat.getStatus();
@@ -144,8 +215,13 @@ public class SeatService {
     }
 
     @Transactional
+    public SeatResponse updateSeat(Integer screenId, Long seatId, SeatRequest request, Long actorUserId, String ipAddress) {
+        return updateSeat(screenId != null ? screenId.longValue() : null, seatId, request, actorUserId, ipAddress);
+    }
+
+    @Transactional
     public SeatResponse updateSeat(Long seatId, SeatRequest request, Long actorUserId, String ipAddress) {
-        return updateSeat(null, seatId, request, actorUserId, ipAddress);
+        return updateSeat((Long) null, seatId, request, actorUserId, ipAddress);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

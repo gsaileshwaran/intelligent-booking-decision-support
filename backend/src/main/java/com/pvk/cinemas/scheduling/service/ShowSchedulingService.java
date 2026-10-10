@@ -7,6 +7,7 @@ import com.pvk.cinemas.catalogue.model.Language;
 import com.pvk.cinemas.catalogue.model.Movie;
 import com.pvk.cinemas.catalogue.model.MovieLanguage;
 import com.pvk.cinemas.catalogue.repository.LanguageRepository;
+import com.pvk.cinemas.catalogue.repository.AudioFormatRepository;
 import com.pvk.cinemas.catalogue.repository.MovieLanguageRepository;
 import com.pvk.cinemas.catalogue.repository.MovieRepository;
 import com.pvk.cinemas.catalogue.repository.PresentationFormatRepository;
@@ -18,6 +19,7 @@ import com.pvk.cinemas.common.exceptions.InvalidMovieLanguageException;
 import com.pvk.cinemas.common.exceptions.ResourceNotFoundException;
 import com.pvk.cinemas.common.exceptions.ShowOverlapException;
 import org.springframework.security.access.AccessDeniedException;
+import com.pvk.cinemas.security.TheatreScopeService;
 import com.pvk.cinemas.infrastructure.model.Screen;
 import com.pvk.cinemas.infrastructure.model.Seat;
 import com.pvk.cinemas.infrastructure.repository.ScreenRepository;
@@ -31,6 +33,7 @@ import com.pvk.cinemas.scheduling.model.ScreenCapability;
 import com.pvk.cinemas.scheduling.model.Show;
 import com.pvk.cinemas.scheduling.repository.ScreenCapabilityRepository;
 import com.pvk.cinemas.scheduling.repository.ShowRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,8 +65,42 @@ public class ShowSchedulingService {
     private final SeatRepository seatRepository;
     private final AuditLogService auditLogService;
     private final PresentationFormatRepository presentationFormatRepository;
+    private final AudioFormatRepository audioFormatRepository;
     private final SeatPricingService seatPricingService;
     private final BusinessDateProvider businessDateProvider;
+
+    @Autowired
+    public ShowSchedulingService(ShowRepository showRepository,
+                                 ShowSeatRepository showSeatRepository,
+                                 ScreenRepository screenRepository,
+                                 ScreenCapabilityRepository screenCapabilityRepository,
+                                 MovieRepository movieRepository,
+                                 MovieLanguageRepository movieLanguageRepository,
+                                 LanguageRepository languageRepository,
+                                 TheatreRepository theatreRepository,
+                                 CityRepository cityRepository,
+                                 SeatRepository seatRepository,
+                                 AuditLogService auditLogService,
+                                 PresentationFormatRepository presentationFormatRepository,
+                                 AudioFormatRepository audioFormatRepository,
+                                 SeatPricingService seatPricingService,
+                                 BusinessDateProvider businessDateProvider) {
+        this.showRepository = showRepository;
+        this.showSeatRepository = showSeatRepository;
+        this.screenRepository = screenRepository;
+        this.screenCapabilityRepository = screenCapabilityRepository;
+        this.movieRepository = movieRepository;
+        this.movieLanguageRepository = movieLanguageRepository;
+        this.languageRepository = languageRepository;
+        this.theatreRepository = theatreRepository;
+        this.cityRepository = cityRepository;
+        this.seatRepository = seatRepository;
+        this.auditLogService = auditLogService;
+        this.presentationFormatRepository = presentationFormatRepository;
+        this.audioFormatRepository = audioFormatRepository;
+        this.seatPricingService = seatPricingService;
+        this.businessDateProvider = businessDateProvider;
+    }
 
     public ShowSchedulingService(ShowRepository showRepository,
                                  ShowSeatRepository showSeatRepository,
@@ -79,20 +116,17 @@ public class ShowSchedulingService {
                                  PresentationFormatRepository presentationFormatRepository,
                                  SeatPricingService seatPricingService,
                                  BusinessDateProvider businessDateProvider) {
-        this.showRepository = showRepository;
-        this.showSeatRepository = showSeatRepository;
-        this.screenRepository = screenRepository;
-        this.screenCapabilityRepository = screenCapabilityRepository;
-        this.movieRepository = movieRepository;
-        this.movieLanguageRepository = movieLanguageRepository;
-        this.languageRepository = languageRepository;
-        this.theatreRepository = theatreRepository;
-        this.cityRepository = cityRepository;
-        this.seatRepository = seatRepository;
-        this.auditLogService = auditLogService;
-        this.presentationFormatRepository = presentationFormatRepository;
-        this.seatPricingService = seatPricingService;
-        this.businessDateProvider = businessDateProvider;
+        this(showRepository, showSeatRepository, screenRepository, screenCapabilityRepository,
+             movieRepository, movieLanguageRepository, languageRepository, theatreRepository,
+             cityRepository, seatRepository, auditLogService, presentationFormatRepository,
+             null, seatPricingService, businessDateProvider);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TheatreScopeService theatreScopeService;
+
+    public void setTheatreScopeService(TheatreScopeService theatreScopeService) {
+        this.theatreScopeService = theatreScopeService;
     }
 
     /**
@@ -103,6 +137,16 @@ public class ShowSchedulingService {
      */
     @Transactional
     public ShowResponse createShow(Integer theatreId, ShowRequest request, Long actorUserId, String ipAddress) {
+        if (theatreScopeService != null) {
+            theatreScopeService.checkTheatreScope(theatreId);
+        }
+
+        // 0. Calendar horizon validation (§3)
+        if (request.getStartAt() != null && businessDateProvider != null) {
+            LocalDate showDate = request.getStartAt().atZone(IST_ZONE).toLocalDate();
+            businessDateProvider.validateCalendarRange(showDate);
+        }
+
         // 1. Chronological sanity (BR-001)
         if (request.getStartAt() == null || request.getEndAt() == null || !request.getEndAt().isAfter(request.getStartAt())) {
             throw new BadRequestException("Show end time must be strictly greater than start time (BR-001)");
@@ -116,11 +160,42 @@ public class ShowSchedulingService {
             throw new BadRequestException("Screen " + request.getScreenId() + " does not belong to theatre " + theatreId);
         }
 
-        // 4. Movie Language verification (BR-002)
+        // 3. Operating hours validation (§5.3)
+        if (theatreRepository != null && screen.getTheatreId() != null) {
+            theatreRepository.findById(screen.getTheatreId()).ifPresent(theatre -> {
+                if (theatre.getOpeningTime() != null && theatre.getClosingTime() != null) {
+                    LocalDate showDate = request.getStartAt().atZone(IST_ZONE).toLocalDate();
+                    ZonedDateTime tOpen = showDate.atTime(theatre.getOpeningTime()).atZone(IST_ZONE);
+                    ZonedDateTime tClose;
+                    if (!theatre.getClosingTime().isAfter(theatre.getOpeningTime())) {
+                        tClose = showDate.plusDays(1).atTime(theatre.getClosingTime()).atZone(IST_ZONE);
+                    } else {
+                        tClose = showDate.atTime(theatre.getClosingTime()).atZone(IST_ZONE);
+                    }
+                    if (request.getStartAt().isBefore(tOpen.toInstant()) || request.getEndAt().isAfter(tClose.toInstant())) {
+                        throw new BadRequestException("Show timing violates theatre operating hours ("
+                                + theatre.getOpeningTime() + " to " + theatre.getClosingTime() + ")");
+                    }
+                }
+            });
+        }
+
+        // 4. Movie Language verification (BR-002) and Movie Lifecycle exhibition window (§5.1)
         MovieLanguage movieLanguage = movieLanguageRepository.findById(request.getMovieLanguageId())
                 .orElseThrow(() -> new ResourceNotFoundException("Movie Language not found: " + request.getMovieLanguageId()));
         if (request.getMovieId() == null || movieLanguage.getMovieId() == null || movieLanguage.getMovieId().longValue() != request.getMovieId().longValue()) {
             throw new InvalidMovieLanguageException("Movie language track does not belong to selected movie (BR-002)");
+        }
+        if (movieRepository != null && movieLanguage.getMovieId() != null) {
+            movieRepository.findById(movieLanguage.getMovieId()).ifPresent(movie -> {
+                if (movie.getExhibitionStartDate() != null && movie.getExhibitionEndDate() != null) {
+                    LocalDate showDate = request.getStartAt().atZone(IST_ZONE).toLocalDate();
+                    if (showDate.isBefore(movie.getExhibitionStartDate()) || showDate.isAfter(movie.getExhibitionEndDate())) {
+                        throw new BadRequestException("Show date " + showDate + " is outside movie exhibition window ["
+                                + movie.getExhibitionStartDate() + " to " + movie.getExhibitionEndDate() + "]");
+                    }
+                }
+            });
         }
 
         // 5. Screen Capability verification (BR-003)
@@ -131,18 +206,75 @@ public class ShowSchedulingService {
             throw new InvalidCapabilityException("Screen capability does not belong to selected screen (BR-003)");
         }
 
+        // 5b. Presentation & Audio format compatibility validation (§11.1)
+        if (request.getPresentationFormatId() != null) {
+            if (presentationFormatRepository != null) {
+                presentationFormatRepository.findById(request.getPresentationFormatId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Presentation format not found: " + request.getPresentationFormatId()));
+            }
+            if (capability.getPresentationFormatId() == null || !capability.getPresentationFormatId().equals(request.getPresentationFormatId())) {
+                throw new BadRequestException("Presentation format does not match selected screen capability");
+            }
+        }
+
+        if (request.getAudioFormatId() != null) {
+            if (audioFormatRepository != null) {
+                audioFormatRepository.findById(request.getAudioFormatId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Audio format not found: " + request.getAudioFormatId()));
+            }
+            if (capability.getAudioFormatId() == null || !capability.getAudioFormatId().equals(request.getAudioFormatId())) {
+                throw new BadRequestException("Audio format does not match selected screen capability");
+            }
+        }
+
         // 6. Non-overlapping active show verification (BR-004)
         long overlappingCount = showRepository.countOverlappingShows(screenId, request.getStartAt(), request.getEndAt());
         if (overlappingCount > 0) {
             throw new ShowOverlapException("Conflicting active show exists on screen " + request.getScreenId() + " for requested timing (BR-004)");
         }
 
+        // 6b. Turnaround buffer verification (§5.2)
+        int turnaroundMinutes = 20;
+        if (screen.getIsPremium() != null && screen.getIsPremium()) {
+            turnaroundMinutes = 30;
+        } else if (presentationFormatRepository != null && capability.getPresentationFormatId() != null) {
+            var pfOpt = presentationFormatRepository.findById(capability.getPresentationFormatId());
+            if (pfOpt.isPresent()) {
+                String code = pfOpt.get().getFormatCode();
+                if ("IMAX".equalsIgnoreCase(code) || "4DX".equalsIgnoreCase(code)) {
+                    turnaroundMinutes = 30;
+                }
+            }
+        }
+
+        List<ScreenCapability> screenCaps = screenCapabilityRepository.findByScreenId(screenId);
+        List<Long> allCapIds = screenCaps.isEmpty() ? List.of(capability.getScreenCapabilityId()) : screenCaps.stream().map(ScreenCapability::getScreenCapabilityId).toList();
+        List<Show> activeShowsOnScreen = showRepository.findByScreenCapabilityIdInAndStatusIn(
+                allCapIds,
+                List.of("SCHEDULED", "OPEN")
+        );
+        for (Show existing : activeShowsOnScreen) {
+            if (existing.getEndAt() != null && existing.getEndAt().isBefore(request.getStartAt())
+                    && existing.getEndAt().plus(java.time.Duration.ofMinutes(turnaroundMinutes)).isAfter(request.getStartAt())) {
+                throw new BadRequestException("Insufficient turnaround buffer of " + turnaroundMinutes + " minutes required between shows");
+            }
+            if (existing.getStartAt() != null && existing.getStartAt().isAfter(request.getEndAt())
+                    && request.getEndAt().plus(java.time.Duration.ofMinutes(turnaroundMinutes)).isAfter(existing.getStartAt())) {
+                throw new BadRequestException("Insufficient turnaround buffer of " + turnaroundMinutes + " minutes required between shows");
+            }
+        }
+
         // 7. Insert SHOW
         Show show = new Show();
         show.setMovieLanguageId(movieLanguage.getMovieLanguageId());
         show.setScreenCapabilityId(screenCapId);
+        show.setScreenId(screenId);  // Part 3: physical screen identity (V10)
         show.setStartAt(request.getStartAt());
         show.setEndAt(request.getEndAt());
+        // showDate is set via constructor derivation from startAt (IST) — V10 persisted column
+        if (request.getStartAt() != null) {
+            show.setShowDate(request.getStartAt().atZone(java.time.ZoneId.of("Asia/Kolkata")).toLocalDate());
+        }
         show.setShowStatus(request.getShowStatus() != null ? request.getShowStatus().toUpperCase() : "SCHEDULED");
         show.setCreatedAt(Instant.now());
         show.setUpdatedAt(Instant.now());
@@ -169,6 +301,11 @@ public class ShowSchedulingService {
 
     @Transactional
     public ShowResponse updateShow(Integer theatreId, Long showId, ShowRequest request, Long actorUserId, String ipAddress) {
+        if (theatreScopeService != null) {
+            theatreScopeService.checkTheatreScope(theatreId);
+            theatreScopeService.checkShowScope(showId, theatreId);
+        }
+
         Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
 
@@ -181,24 +318,121 @@ public class ShowSchedulingService {
             throw new AccessDeniedException("Show does not belong to specified theatre");
         }
 
-        if (request.getStartAt() != null && request.getEndAt() != null) {
-            if (!request.getEndAt().isAfter(request.getStartAt())) {
+        // Format compatibility validation (if provided in update request)
+        if (request.getPresentationFormatId() != null) {
+            if (presentationFormatRepository != null) {
+                presentationFormatRepository.findById(request.getPresentationFormatId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Presentation format not found: " + request.getPresentationFormatId()));
+            }
+            if (sc.getPresentationFormatId() == null || !sc.getPresentationFormatId().equals(request.getPresentationFormatId())) {
+                throw new BadRequestException("Presentation format does not match selected screen capability");
+            }
+        }
+
+        if (request.getAudioFormatId() != null) {
+            if (audioFormatRepository != null) {
+                audioFormatRepository.findById(request.getAudioFormatId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Audio format not found: " + request.getAudioFormatId()));
+            }
+            if (sc.getAudioFormatId() == null || !sc.getAudioFormatId().equals(request.getAudioFormatId())) {
+                throw new BadRequestException("Audio format does not match selected screen capability");
+            }
+        }
+
+        boolean timingChanged = (request.getStartAt() != null || request.getEndAt() != null);
+        Instant effectiveStart = request.getStartAt() != null ? request.getStartAt() : show.getStartAt();
+        Instant effectiveEnd = request.getEndAt() != null ? request.getEndAt() : show.getEndAt();
+
+        if (timingChanged) {
+            if (effectiveStart == null || effectiveEnd == null || !effectiveEnd.isAfter(effectiveStart)) {
                 throw new BadRequestException("Show end time must be after start time (BR-001)");
             }
-            show.setStartAt(request.getStartAt());
-            show.setEndAt(request.getEndAt());
+
+            LocalDate newShowDate = effectiveStart.atZone(IST_ZONE).toLocalDate();
+            if (businessDateProvider != null) {
+                businessDateProvider.validateCalendarRange(newShowDate);
+            }
+
+            // Movie Lifecycle exhibition window
+            if (movieRepository != null && show.getMovieLanguageId() != null) {
+                movieLanguageRepository.findById(show.getMovieLanguageId()).ifPresent(ml -> {
+                    movieRepository.findById(ml.getMovieId()).ifPresent(movie -> {
+                        if (movie.getExhibitionStartDate() != null && movie.getExhibitionEndDate() != null) {
+                            if (newShowDate.isBefore(movie.getExhibitionStartDate()) || newShowDate.isAfter(movie.getExhibitionEndDate())) {
+                                throw new BadRequestException("Show date " + newShowDate + " is outside movie exhibition window ["
+                                        + movie.getExhibitionStartDate() + " to " + movie.getExhibitionEndDate() + "]");
+                            }
+                        }
+                    });
+                });
+            }
+
+            // Operating hours validation
+            if (theatreRepository != null && screen.getTheatreId() != null) {
+                theatreRepository.findById(screen.getTheatreId()).ifPresent(theatre -> {
+                    if (theatre.getOpeningTime() != null && theatre.getClosingTime() != null) {
+                        ZonedDateTime tOpen = newShowDate.atTime(theatre.getOpeningTime()).atZone(IST_ZONE);
+                        ZonedDateTime tClose;
+                        if (!theatre.getClosingTime().isAfter(theatre.getOpeningTime())) {
+                            tClose = newShowDate.plusDays(1).atTime(theatre.getClosingTime()).atZone(IST_ZONE);
+                        } else {
+                            tClose = newShowDate.atTime(theatre.getClosingTime()).atZone(IST_ZONE);
+                        }
+                        if (effectiveStart.isBefore(tOpen.toInstant()) || effectiveEnd.isAfter(tClose.toInstant())) {
+                            throw new BadRequestException("Show timing violates theatre operating hours ("
+                                    + theatre.getOpeningTime() + " to " + theatre.getClosingTime() + ")");
+                        }
+                    }
+                });
+            }
+
+            // Re-check overlap excluding current show
+            long overlaps = showRepository.countOverlappingShowsExcluding(screen.getScreenId(), showId, effectiveStart, effectiveEnd);
+            if (overlaps > 0) {
+                throw new ShowOverlapException("Conflicting show exists for updated timing (BR-004)");
+            }
+
+            // Turnaround buffer verification
+            int turnaroundMinutes = 20;
+            if (screen.getIsPremium() != null && screen.getIsPremium()) {
+                turnaroundMinutes = 30;
+            } else if (presentationFormatRepository != null && sc.getPresentationFormatId() != null) {
+                var pfOpt = presentationFormatRepository.findById(sc.getPresentationFormatId());
+                if (pfOpt.isPresent()) {
+                    String code = pfOpt.get().getFormatCode();
+                    if ("IMAX".equalsIgnoreCase(code) || "4DX".equalsIgnoreCase(code)) {
+                        turnaroundMinutes = 30;
+                    }
+                }
+            }
+
+            List<ScreenCapability> screenCaps = screenCapabilityRepository.findByScreenId(screen.getScreenId());
+            List<Long> allCapIds = screenCaps.isEmpty() ? List.of(sc.getScreenCapabilityId()) : screenCaps.stream().map(ScreenCapability::getScreenCapabilityId).toList();
+            List<Show> activeShowsOnScreen = showRepository.findByScreenCapabilityIdInAndStatusIn(
+                    allCapIds,
+                    List.of("SCHEDULED", "OPEN")
+            );
+            for (Show existing : activeShowsOnScreen) {
+                if (existing.getShowId().equals(showId)) {
+                    continue; // Exclude current show
+                }
+                if (existing.getEndAt() != null && existing.getEndAt().isBefore(effectiveStart)
+                        && existing.getEndAt().plus(java.time.Duration.ofMinutes(turnaroundMinutes)).isAfter(effectiveStart)) {
+                    throw new BadRequestException("Insufficient turnaround buffer of " + turnaroundMinutes + " minutes required between shows");
+                }
+                if (existing.getStartAt() != null && existing.getStartAt().isAfter(effectiveEnd)
+                        && effectiveEnd.plus(java.time.Duration.ofMinutes(turnaroundMinutes)).isAfter(existing.getStartAt())) {
+                    throw new BadRequestException("Insufficient turnaround buffer of " + turnaroundMinutes + " minutes required between shows");
+                }
+            }
+
+            show.setStartAt(effectiveStart);
+            show.setEndAt(effectiveEnd);
+            show.setShowDate(newShowDate);
         }
 
         if (request.getShowStatus() != null) {
             show.setShowStatus(request.getShowStatus().toUpperCase());
-        }
-
-        // Re-check overlap if timing changed
-        if (request.getStartAt() != null && request.getEndAt() != null) {
-            long overlaps = showRepository.countOverlappingShowsExcluding(sc.getScreenId(), showId, show.getStartAt(), show.getEndAt());
-            if (overlaps > 0) {
-                throw new ShowOverlapException("Conflicting show exists for updated timing (BR-004)");
-            }
         }
 
         show.setUpdatedAt(Instant.now());
@@ -209,6 +443,9 @@ public class ShowSchedulingService {
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date) {
+        if (date != null && businessDateProvider != null) {
+            businessDateProvider.validateCalendarRange(date);
+        }
         if (theatreId == null) {
             return java.util.Collections.emptyList();
         }
@@ -225,6 +462,7 @@ public class ShowSchedulingService {
         return showRepository.findByScreenCapabilityIdIn(capabilityIds).stream()
                 .filter(s -> {
                     if (date == null) return true;
+                    if (s.getShowDate() != null) return s.getShowDate().equals(date);
                     if (s.getStartAt() == null) return false;
                     return s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date);
                 })
@@ -249,6 +487,9 @@ public class ShowSchedulingService {
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForMovie(Long movieId, Integer cityId, LocalDate date) {
+        if (date != null && businessDateProvider != null) {
+            businessDateProvider.validateCalendarRange(date);
+        }
         List<MovieLanguage> mls = movieLanguageRepository.findByMovieId(movieId);
         List<Long> mlIds = mls.stream().map(MovieLanguage::getMovieLanguageId).toList();
         if (mlIds.isEmpty()) {
@@ -257,6 +498,7 @@ public class ShowSchedulingService {
         return showRepository.findByMovieLanguageIdIn(mlIds).stream()
                 .filter(s -> {
                     if (date == null) return true;
+                    if (s.getShowDate() != null) return s.getShowDate().equals(date);
                     if (s.getStartAt() == null) return false;
                     return s.getStartAt().atZone(IST_ZONE).toLocalDate().equals(date);
                 })
@@ -352,8 +594,8 @@ public class ShowSchedulingService {
             resp.setShowDate(showDate.toString());
             resp.setStartTime(TIME_FORMATTER.format(s.getStartAt()).toUpperCase(Locale.ENGLISH));
 
-            boolean isPast = businessDateProvider.isPast(showDate);
-            boolean isBookable = businessDateProvider.isBookable(showDate);
+            boolean isPast = businessDateProvider != null && businessDateProvider.isPast(showDate);
+            boolean isBookable = businessDateProvider == null || businessDateProvider.isBookable(showDate);
             resp.setBookable(isBookable);
             if (isPast) {
                 resp.setBookingEligibility("SHOW_DATE_IN_PAST");

@@ -326,6 +326,7 @@ public class LiveHttpVerificationTest {
         Show show = new Show();
         show.setMovieLanguageId(ml.getMovieLanguageId());
         show.setScreenCapabilityId(cap.getScreenCapabilityId());
+        show.setScreenId(screen.getScreenId());
         show.setStartAt(Instant.now().plus(4, ChronoUnit.HOURS));
         show.setEndAt(Instant.now().plus(6, ChronoUnit.HOURS));
         show.setShowStatus("SCHEDULED");

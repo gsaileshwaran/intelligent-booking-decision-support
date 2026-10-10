@@ -24,6 +24,9 @@ public class ShowRequest {
 
     private String showStatus = "SCHEDULED";
 
+    private Long presentationFormatId;
+    private Long audioFormatId;
+
     public ShowRequest() {}
 
     public Long getMovieId() { return movieId; }
@@ -46,4 +49,10 @@ public class ShowRequest {
 
     public String getShowStatus() { return showStatus; }
     public void setShowStatus(String showStatus) { this.showStatus = showStatus; }
+
+    public Long getPresentationFormatId() { return presentationFormatId; }
+    public void setPresentationFormatId(Long presentationFormatId) { this.presentationFormatId = presentationFormatId; }
+
+    public Long getAudioFormatId() { return audioFormatId; }
+    public void setAudioFormatId(Long audioFormatId) { this.audioFormatId = audioFormatId; }
 }

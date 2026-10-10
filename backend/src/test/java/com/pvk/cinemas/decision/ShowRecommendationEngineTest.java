@@ -195,6 +195,10 @@ class ShowRecommendationEngineTest {
             return seatEntitiesB;
         });
 
+        List<Seat> allScreenSeats = new ArrayList<>(seatEntitiesA);
+        allScreenSeats.addAll(seatEntitiesB);
+        when(seatRepository.findByScreenId(anyLong())).thenReturn(allScreenSeats);
+
         // Prices: Show A = ₹250/ticket, Show B = ₹150/ticket
         when(seatHoldService.determineSeatPrice(argThat(id -> id != null && id < 100))).thenReturn(BigDecimal.valueOf(250.00));
         when(seatHoldService.determineSeatPrice(argThat(id -> id != null && id >= 100))).thenReturn(BigDecimal.valueOf(150.00));

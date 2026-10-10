@@ -23,6 +23,10 @@ public class SeatRequest {
     private String status;
     // Optional reason when blocking a seat for maintenance
     private String blockReason;
+    private String pricingZone;
+    private Boolean aisleAfter;
+    private java.math.BigDecimal positionX;
+    private java.math.BigDecimal positionY;
 
     public SeatRequest() {}
 
@@ -49,5 +53,17 @@ public class SeatRequest {
 
     public String getBlockReason() { return blockReason; }
     public void setBlockReason(String blockReason) { this.blockReason = blockReason; }
+
+    public String getPricingZone() { return pricingZone; }
+    public void setPricingZone(String pricingZone) { this.pricingZone = pricingZone; }
+
+    public Boolean getAisleAfter() { return aisleAfter; }
+    public void setAisleAfter(Boolean aisleAfter) { this.aisleAfter = aisleAfter; }
+
+    public java.math.BigDecimal getPositionX() { return positionX; }
+    public void setPositionX(java.math.BigDecimal positionX) { this.positionX = positionX; }
+
+    public java.math.BigDecimal getPositionY() { return positionY; }
+    public void setPositionY(java.math.BigDecimal positionY) { this.positionY = positionY; }
 }
 

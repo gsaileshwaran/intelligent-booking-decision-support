@@ -9,5 +9,6 @@ import java.util.List;
 @Repository
 public interface MovieGenreRepository extends JpaRepository<MovieGenre, MovieGenre.MovieGenreId> {
     List<MovieGenre> findByIdMovieId(Long movieId);
+    List<MovieGenre> findByIdGenreId(Long genreId);
     void deleteByIdMovieId(Long movieId);
 }

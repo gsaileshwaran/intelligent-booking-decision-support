@@ -703,10 +703,10 @@ public class SeatGroupPlanner {
 
         // 1. Average individual seat score and minimum seat score
         double avgIndividual = block.stream()
-                .mapToInt(s -> scoreMap.containsKey(s.getSeatId()) ? scoreMap.get(s.getSeatId()).getScore() : 75)
+                .mapToInt(s -> (scoreMap.containsKey(s.getSeatId()) && scoreMap.get(s.getSeatId()) != null) ? scoreMap.get(s.getSeatId()).getScore() : 75)
                 .average().orElse(75);
         int minIndividual = block.stream()
-                .mapToInt(s -> scoreMap.containsKey(s.getSeatId()) ? scoreMap.get(s.getSeatId()).getScore() : 70)
+                .mapToInt(s -> (scoreMap.containsKey(s.getSeatId()) && scoreMap.get(s.getSeatId()) != null) ? scoreMap.get(s.getSeatId()).getScore() : 70)
                 .min().orElse(70);
         double blendedQuality = (0.75 * avgIndividual) + (0.25 * minIndividual);
 

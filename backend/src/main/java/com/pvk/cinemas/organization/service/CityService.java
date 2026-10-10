@@ -31,7 +31,7 @@ public class CityService {
     @Transactional(readOnly = true)
     public List<CityResponse> getAllCities() {
         return cityRepository.findAll().stream()
-                .filter(c -> c.getCityName() != null && !c.getCityName().startsWith("City_Upd_"))
+                .filter(c -> c.getCityName() != null && !c.getCityName().isBlank())
                 .sorted((c1, c2) -> {
                     int i1 = CANONICAL_CITIES.indexOf(c1.getCityName());
                     int i2 = CANONICAL_CITIES.indexOf(c2.getCityName());
@@ -45,10 +45,18 @@ public class CityService {
     }
 
     @Transactional(readOnly = true)
-    public CityResponse getCityById(Integer cityId) {
+    public CityResponse getCityById(Long cityId) {
+        if (cityId == null) {
+            throw new ResourceNotFoundException("City not found: null");
+        }
         return cityRepository.findById(cityId)
                 .map(this::mapToResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("City not found: " + cityId));
+    }
+
+    @Transactional(readOnly = true)
+    public CityResponse getCityById(Integer cityId) {
+        return getCityById(cityId != null ? cityId.longValue() : null);
     }
 
     @Transactional
@@ -64,17 +72,25 @@ public class CityService {
     }
 
     @Transactional
-    public CityResponse updateCity(Integer cityId, CityRequest request, Long actorUserId, String ipAddress) {
+    public CityResponse updateCity(Long cityId, CityRequest request, Long actorUserId, String ipAddress) {
+        if (cityId == null) {
+            throw new ResourceNotFoundException("City not found: null");
+        }
         City city = cityRepository.findById(cityId)
                 .orElseThrow(() -> new ResourceNotFoundException("City not found: " + cityId));
 
-        if (request.getCityName() != null) city.setCityName(request.getCityName().trim());
-        if (request.getStateName() != null) city.setStateName(request.getStateName().trim());
-        if (request.getCountryCode() != null) city.setCountryCode(request.getCountryCode().trim());
+        if (request.getCityName() != null && !request.getCityName().isBlank()) city.setCityName(request.getCityName().trim());
+        if (request.getStateName() != null && !request.getStateName().isBlank()) city.setStateName(request.getStateName().trim());
+        if (request.getCountryCode() != null && !request.getCountryCode().isBlank()) city.setCountryCode(request.getCountryCode().trim());
         city = cityRepository.save(city);
 
         auditLogService.logAction(actorUserId, "CITY_UPDATE", "CITY", String.valueOf(cityId), "Updated city " + city.getCityName(), ipAddress);
         return mapToResponse(city);
+    }
+
+    @Transactional
+    public CityResponse updateCity(Integer cityId, CityRequest request, Long actorUserId, String ipAddress) {
+        return updateCity(cityId != null ? cityId.longValue() : null, request, actorUserId, ipAddress);
     }
 
     private CityResponse mapToResponse(City c) {

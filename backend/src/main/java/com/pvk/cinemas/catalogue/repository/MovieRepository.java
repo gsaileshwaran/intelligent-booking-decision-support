@@ -17,6 +17,8 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
 
     List<Movie> findByStatus(String status);
     Page<Movie> findAll(Pageable pageable);
+    java.util.Optional<Movie> findByTitle(String title);
+    List<Movie> findByDemandTier(String demandTier);
 
     @Query(value = """
         SELECT DISTINCT m.* FROM movie m

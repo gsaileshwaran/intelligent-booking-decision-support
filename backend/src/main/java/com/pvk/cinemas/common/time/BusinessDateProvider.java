@@ -91,4 +91,58 @@ public class BusinessDateProvider {
         }
         return window;
     }
+
+    // =========================================================================
+    // Part 3: Year-Long Calendar Horizon Architecture (§3)
+    // Total Calendar Horizon: Exactly 365 calendar days [B - 260, B + 104]
+    // =========================================================================
+
+    public static final int HORIZON_PAST_DAYS = 260;
+    public static final int HORIZON_FUTURE_DAYS = 104;
+    public static final int ACTIVE_BOOKING_WINDOW_DAYS = 14;
+
+    public LocalDate getCalendarHorizonStart() {
+        return businessDate.minusDays(HORIZON_PAST_DAYS);
+    }
+
+    public LocalDate getCalendarHorizonEnd() {
+        return businessDate.plusDays(HORIZON_FUTURE_DAYS);
+    }
+
+    public boolean isWithinCalendarRange(LocalDate date) {
+        if (date == null) return false;
+        return !date.isBefore(getCalendarHorizonStart()) && !date.isAfter(getCalendarHorizonEnd());
+    }
+
+    public void validateCalendarRange(LocalDate date) {
+        if (date != null && !isWithinCalendarRange(date)) {
+            throw new com.pvk.cinemas.common.exceptions.OutOfCalendarRangeException(
+                    "Date " + date + " is outside the allowed year-long calendar horizon ["
+                            + getCalendarHorizonStart() + " to " + getCalendarHorizonEnd() + "]");
+        }
+    }
+
+    public LocalDate getHistoricalArchiveStart() {
+        return businessDate.minusDays(HORIZON_PAST_DAYS);
+    }
+
+    public LocalDate getHistoricalArchiveEnd() {
+        return businessDate.minusDays(1);
+    }
+
+    public LocalDate getActiveBookingWindowStart() {
+        return businessDate;
+    }
+
+    public LocalDate getActiveBookingWindowEnd() {
+        return businessDate.plusDays(ACTIVE_BOOKING_WINDOW_DAYS - 1);
+    }
+
+    public LocalDate getAdvanceScheduleStart() {
+        return businessDate.plusDays(ACTIVE_BOOKING_WINDOW_DAYS);
+    }
+
+    public LocalDate getAdvanceScheduleEnd() {
+        return businessDate.plusDays(HORIZON_FUTURE_DAYS);
+    }
 }

@@ -16,8 +16,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,6 +33,7 @@ public class MovieService {
     private final MovieLanguageRepository movieLanguageRepository;
     private final CertificationRepository certificationRepository;
     private final AuditLogService auditLogService;
+    private final MovieLifecycleService movieLifecycleService;
 
     public MovieService(MovieRepository movieRepository,
                         GenreRepository genreRepository,
@@ -37,7 +41,8 @@ public class MovieService {
                         LanguageRepository languageRepository,
                         MovieLanguageRepository movieLanguageRepository,
                         CertificationRepository certificationRepository,
-                        AuditLogService auditLogService) {
+                        AuditLogService auditLogService,
+                        MovieLifecycleService movieLifecycleService) {
         this.movieRepository = movieRepository;
         this.genreRepository = genreRepository;
         this.movieGenreRepository = movieGenreRepository;
@@ -45,19 +50,87 @@ public class MovieService {
         this.movieLanguageRepository = movieLanguageRepository;
         this.certificationRepository = certificationRepository;
         this.auditLogService = auditLogService;
+        this.movieLifecycleService = movieLifecycleService;
     }
 
     @Transactional(readOnly = true)
-    public Page<MovieResponse> getMovies(String status, Integer cityId, Pageable pageable) {
+    public Page<MovieResponse> getMovies(String status, Integer cityId, String language, Long languageId, Long genreId, Long certificationId, String demandTier, Pageable pageable) {
         List<Movie> movies;
         String cleanStatus = (status != null && !status.isBlank()) ? status.trim().toUpperCase() : null;
         if (cityId != null) {
             movies = movieRepository.findMoviesByCityAndStatus(cityId, cleanStatus);
-        } else if (cleanStatus != null) {
+        } else if (cleanStatus != null && ("UPCOMING".equals(cleanStatus) || "AIRING".equals(cleanStatus) || "ENDED".equals(cleanStatus))) {
             movies = movieRepository.findByMovieStatus(cleanStatus);
         } else {
             movies = movieRepository.findAll();
         }
+
+        // Apply lifecycle status filter if not already filtered
+        if (cleanStatus != null) {
+            movies = movies.stream()
+                    .filter(m -> {
+                        String effective = movieLifecycleService.determineEffectiveStatus(m);
+                        String stage = movieLifecycleService.calculateLifecycleStage(m);
+                        String dbStatus = m.getMovieStatus() != null ? m.getMovieStatus().toUpperCase() : "";
+                        return cleanStatus.equalsIgnoreCase(effective)
+                                || cleanStatus.equalsIgnoreCase(stage)
+                                || cleanStatus.equalsIgnoreCase(dbStatus);
+                    })
+                    .collect(Collectors.toList());
+        }
+
+        // Apply demand tier filter if provided
+        if (demandTier != null && !demandTier.isBlank()) {
+            String cleanTier = demandTier.trim().toUpperCase();
+            movies = movies.stream()
+                    .filter(m -> cleanTier.equalsIgnoreCase(m.getDemandTier()))
+                    .collect(Collectors.toList());
+        }
+
+        // Apply certificationId filter if provided
+        if (certificationId != null) {
+            movies = movies.stream()
+                    .filter(m -> m.getCertificationId() != null && m.getCertificationId().equals(certificationId))
+                    .collect(Collectors.toList());
+        }
+
+        // Apply genreId filter if provided
+        if (genreId != null) {
+            Set<Long> movieIdsWithGenre = movieGenreRepository.findByIdGenreId(genreId).stream()
+                    .map(mg -> mg.getId().getMovieId())
+                    .collect(Collectors.toSet());
+            movies = movies.stream()
+                    .filter(m -> movieIdsWithGenre.contains(m.getMovieId()))
+                    .collect(Collectors.toList());
+        }
+
+        // Apply languageId filter if provided
+        if (languageId != null) {
+            Set<Long> movieIdsWithLangId = movieLanguageRepository.findByLanguageId(languageId).stream()
+                    .map(MovieLanguage::getMovieId)
+                    .collect(Collectors.toSet());
+            movies = movies.stream()
+                    .filter(m -> movieIdsWithLangId.contains(m.getMovieId()))
+                    .collect(Collectors.toList());
+        }
+
+        // Apply language filter if provided (matches language_code like 'ta' or name like 'Tamil')
+        if (language != null && !language.isBlank()) {
+            String cleanLang = language.trim();
+            List<Language> matchedLangs = languageRepository.findAll().stream()
+                    .filter(l -> cleanLang.equalsIgnoreCase(l.getLanguageCode()) || cleanLang.equalsIgnoreCase(l.getName()))
+                    .collect(Collectors.toList());
+            Set<Long> matchedLangIds = matchedLangs.stream().map(Language::getLanguageId).collect(Collectors.toSet());
+            movies = movies.stream()
+                    .filter(m -> {
+                        List<MovieLanguage> mls = movieLanguageRepository.findByMovieId(m.getMovieId());
+                        return mls.stream().anyMatch(ml -> matchedLangIds.contains(ml.getLanguageId()));
+                    })
+                    .collect(Collectors.toList());
+        }
+
+        // Prevent duplicate movies
+        movies = movies.stream().distinct().collect(Collectors.toList());
 
         int start = (int) pageable.getOffset();
         int end = Math.min((start + pageable.getPageSize()), movies.size());
@@ -69,8 +142,18 @@ public class MovieService {
     }
 
     @Transactional(readOnly = true)
+    public Page<MovieResponse> getMovies(String status, Integer cityId, String language, String demandTier, Pageable pageable) {
+        return getMovies(status, cityId, language, null, null, null, demandTier, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<MovieResponse> getMovies(String status, Integer cityId, Pageable pageable) {
+        return getMovies(status, cityId, null, null, null, null, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
     public Page<MovieResponse> getMovies(String status, Pageable pageable) {
-        return getMovies(status, null, pageable);
+        return getMovies(status, null, null, null, null, null, null, pageable);
     }
 
     @Transactional(readOnly = true)
@@ -121,6 +204,39 @@ public class MovieService {
             throw new BadRequestException("Runtime minutes must be greater than 0");
         }
 
+        movieLifecycleService.validateMovieMetadata(
+                request.getDemandTier(),
+                request.getPopularityScore(),
+                request.getExhibitionStartDate(),
+                request.getExhibitionEndDate()
+        );
+
+        // Validate genreIds upfront before persisting anything
+        List<Genre> validatedGenres = new ArrayList<>();
+        if (request.getGenreIds() != null && !request.getGenreIds().isEmpty()) {
+            for (Integer gid : request.getGenreIds()) {
+                if (gid == null) {
+                    throw new BadRequestException("Genre ID cannot be null");
+                }
+                Genre genre = genreRepository.findById(gid)
+                        .orElseThrow(() -> new ResourceNotFoundException("Genre not found: " + gid));
+                validatedGenres.add(genre);
+            }
+        }
+
+        // Validate languageIds upfront before persisting anything
+        List<Language> validatedLanguages = new ArrayList<>();
+        if (request.getLanguageIds() != null && !request.getLanguageIds().isEmpty()) {
+            for (Integer lid : request.getLanguageIds()) {
+                if (lid == null) {
+                    throw new BadRequestException("Language ID cannot be null");
+                }
+                Language language = languageRepository.findById(lid)
+                        .orElseThrow(() -> new ResourceNotFoundException("Language not found: " + lid));
+                validatedLanguages.add(language);
+            }
+        }
+
         Movie movie = new Movie();
         movie.setCertificationId(request.getCertificationId());
         movie.setTitle(request.getTitle().trim());
@@ -129,20 +245,36 @@ public class MovieService {
         movie.setReleaseDate(request.getReleaseDate());
         movie.setPosterUrl(request.getPosterUrl());
         movie.setTrailerUrl(request.getTrailerUrl());
-        movie.setMovieStatus(request.getMovieStatus() != null ? request.getMovieStatus().toUpperCase() : "UPCOMING");
+        movie.setDemandTier(request.getDemandTier() != null ? request.getDemandTier().trim().toUpperCase() : null);
+        movie.setPopularityScore(request.getPopularityScore());
+        movie.setExhibitionStartDate(request.getExhibitionStartDate());
+        movie.setExhibitionEndDate(request.getExhibitionEndDate());
+
+        if (request.getMovieStatus() != null && !request.getMovieStatus().isBlank()) {
+            movie.setMovieStatus(request.getMovieStatus().toUpperCase());
+        } else if (movie.getExhibitionStartDate() != null && movie.getExhibitionEndDate() != null) {
+            movie.setMovieStatus(movieLifecycleService.determineEffectiveStatus(movie));
+        } else {
+            movie.setMovieStatus("UPCOMING");
+        }
+
         movie.setCreatedAt(Instant.now());
         movie.setUpdatedAt(Instant.now());
         final Movie savedMovie = movieRepository.save(movie);
 
-        if (request.getGenreIds() != null) {
-            for (Integer gid : request.getGenreIds()) {
-                genreRepository.findById(gid).ifPresent(g -> movieGenreRepository.save(new MovieGenre(savedMovie.getMovieId(), gid)));
+        // Save validated genres (deduplicating to prevent unique/composite key collisions)
+        Set<Long> savedGenreIds = new HashSet<>();
+        for (Genre g : validatedGenres) {
+            if (savedGenreIds.add(g.getGenreId())) {
+                movieGenreRepository.save(new MovieGenre(savedMovie.getMovieId(), g.getGenreId()));
             }
         }
 
-        if (request.getLanguageIds() != null) {
-            for (Integer lid : request.getLanguageIds()) {
-                languageRepository.findById(lid).ifPresent(l -> movieLanguageRepository.save(new MovieLanguage(savedMovie.getMovieId(), lid, "ORIGINAL")));
+        // Save validated languages (deduplicating to prevent unique constraint collisions)
+        Set<Long> savedLangIds = new HashSet<>();
+        for (Language l : validatedLanguages) {
+            if (savedLangIds.add(l.getLanguageId())) {
+                movieLanguageRepository.save(new MovieLanguage(savedMovie.getMovieId(), l.getLanguageId(), "ORIGINAL"));
             }
         }
 
@@ -169,7 +301,25 @@ public class MovieService {
         if (request.getReleaseDate() != null) movie.setReleaseDate(request.getReleaseDate());
         if (request.getPosterUrl() != null) movie.setPosterUrl(request.getPosterUrl());
         if (request.getTrailerUrl() != null) movie.setTrailerUrl(request.getTrailerUrl());
-        if (request.getMovieStatus() != null) movie.setMovieStatus(request.getMovieStatus().toUpperCase());
+
+        String targetTier = request.getDemandTier() != null ? request.getDemandTier().trim().toUpperCase() : movie.getDemandTier();
+        java.math.BigDecimal targetScore = request.getPopularityScore() != null ? request.getPopularityScore() : movie.getPopularityScore();
+        LocalDate targetStart = request.getExhibitionStartDate() != null ? request.getExhibitionStartDate() : movie.getExhibitionStartDate();
+        LocalDate targetEnd = request.getExhibitionEndDate() != null ? request.getExhibitionEndDate() : movie.getExhibitionEndDate();
+
+        movieLifecycleService.validateMovieMetadata(targetTier, targetScore, targetStart, targetEnd);
+
+        if (request.getDemandTier() != null) movie.setDemandTier(targetTier);
+        if (request.getPopularityScore() != null) movie.setPopularityScore(targetScore);
+        if (request.getExhibitionStartDate() != null) movie.setExhibitionStartDate(targetStart);
+        if (request.getExhibitionEndDate() != null) movie.setExhibitionEndDate(targetEnd);
+
+        if (request.getMovieStatus() != null) {
+            movie.setMovieStatus(request.getMovieStatus().toUpperCase());
+        } else if (movie.getExhibitionStartDate() != null && movie.getExhibitionEndDate() != null) {
+            movie.setMovieStatus(movieLifecycleService.determineEffectiveStatus(movie));
+        }
+
         movie.setUpdatedAt(Instant.now());
         movie = movieRepository.save(movie);
 
@@ -188,7 +338,15 @@ public class MovieService {
         resp.setReleaseDate(m.getReleaseDate());
         resp.setPosterUrl(m.getPosterUrl());
         resp.setTrailerUrl(m.getTrailerUrl());
-        resp.setMovieStatus(m.getMovieStatus());
+
+        String effectiveStatus = movieLifecycleService.determineEffectiveStatus(m);
+        resp.setMovieStatus(effectiveStatus);
+        resp.setLifecycleStage(movieLifecycleService.calculateLifecycleStage(m));
+
+        resp.setDemandTier(m.getDemandTier());
+        resp.setPopularityScore(m.getPopularityScore());
+        resp.setExhibitionStartDate(m.getExhibitionStartDate());
+        resp.setExhibitionEndDate(m.getExhibitionEndDate());
 
         List<String> genres = new ArrayList<>();
         for (MovieGenre mg : movieGenreRepository.findByIdMovieId(m.getMovieId())) {

@@ -29,6 +29,16 @@ public class MovieRequest {
     private List<Integer> genreIds;
     private List<Integer> languageIds;
 
+    @Size(max = 20)
+    private String demandTier;
+
+    @jakarta.validation.constraints.DecimalMin(value = "0.00", message = "Popularity score must be >= 0.00")
+    @jakarta.validation.constraints.DecimalMax(value = "10.00", message = "Popularity score must be <= 10.00")
+    private java.math.BigDecimal popularityScore;
+
+    private LocalDate exhibitionStartDate;
+    private LocalDate exhibitionEndDate;
+
     public MovieRequest() {}
 
     public Integer getCertificationId() { return certificationId; }
@@ -60,4 +70,16 @@ public class MovieRequest {
 
     public List<Integer> getLanguageIds() { return languageIds; }
     public void setLanguageIds(List<Integer> languageIds) { this.languageIds = languageIds; }
+
+    public String getDemandTier() { return demandTier; }
+    public void setDemandTier(String demandTier) { this.demandTier = demandTier; }
+
+    public java.math.BigDecimal getPopularityScore() { return popularityScore; }
+    public void setPopularityScore(java.math.BigDecimal popularityScore) { this.popularityScore = popularityScore; }
+
+    public LocalDate getExhibitionStartDate() { return exhibitionStartDate; }
+    public void setExhibitionStartDate(LocalDate exhibitionStartDate) { this.exhibitionStartDate = exhibitionStartDate; }
+
+    public LocalDate getExhibitionEndDate() { return exhibitionEndDate; }
+    public void setExhibitionEndDate(LocalDate exhibitionEndDate) { this.exhibitionEndDate = exhibitionEndDate; }
 }

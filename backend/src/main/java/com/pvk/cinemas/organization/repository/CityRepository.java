@@ -9,6 +9,7 @@ import java.util.Optional;
 @Repository
 public interface CityRepository extends JpaRepository<City, Long> {
     Optional<City> findByCityNameAndStateName(String cityName, String stateName);
+    java.util.List<City> findAllByOrderByCityNameAsc();
 
     default Optional<City> findById(Integer id) {
         return id != null ? findById(id.longValue()) : Optional.empty();

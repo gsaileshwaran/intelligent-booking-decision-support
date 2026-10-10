@@ -37,18 +37,18 @@ public class TheatreController {
     }
 
     @GetMapping("/{theatreId}")
-    public ResponseEntity<ApiResponse<TheatreResponse>> getTheatre(@PathVariable Integer theatreId) {
+    public ResponseEntity<ApiResponse<TheatreResponse>> getTheatre(@PathVariable Long theatreId) {
         return ResponseEntity.ok(ApiResponse.ok(theatreService.getTheatreById(theatreId)));
     }
 
     @GetMapping("/{theatreId}/screens")
-    public ResponseEntity<ApiResponse<List<Screen>>> getScreens(@PathVariable Integer theatreId) {
-        return ResponseEntity.ok(ApiResponse.ok(screenRepository.findByTheatreIdAndIsActiveTrue(theatreId)));
+    public ResponseEntity<ApiResponse<List<com.pvk.cinemas.infrastructure.dto.ScreenResponse>>> getScreens(@PathVariable Long theatreId) {
+        return ResponseEntity.ok(ApiResponse.ok(theatreService.getScreensByTheatre(theatreId)));
     }
 
     @GetMapping("/{theatreId}/shows")
     public ResponseEntity<ApiResponse<List<ShowResponse>>> getShows(
-            @PathVariable Integer theatreId,
+            @PathVariable Long theatreId,
             @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
         return ResponseEntity.ok(ApiResponse.ok(showSchedulingService.getShowsForTheatre(theatreId, date)));
     }
