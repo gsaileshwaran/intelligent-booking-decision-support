@@ -12,8 +12,10 @@ import java.util.List;
 
 @Repository
 public interface MovieRepository extends JpaRepository<Movie, Long> {
-    @Query("SELECT m FROM Movie m WHERE m.status = :status")
+    @Query("SELECT m FROM Movie m WHERE m.status = :status ORDER BY m.movieId ASC")
     List<Movie> findByMovieStatus(@Param("status") String movieStatus);
+
+    List<Movie> findAllByOrderByMovieIdAsc();
 
     List<Movie> findByStatus(String status);
     Page<Movie> findAll(Pageable pageable);

@@ -62,7 +62,7 @@ public class MovieService {
         } else if (cleanStatus != null && ("UPCOMING".equals(cleanStatus) || "AIRING".equals(cleanStatus) || "ENDED".equals(cleanStatus))) {
             movies = movieRepository.findByMovieStatus(cleanStatus);
         } else {
-            movies = movieRepository.findAll();
+            movies = movieRepository.findAllByOrderByMovieIdAsc();
         }
 
         // Apply text query filter q if provided
@@ -141,22 +141,40 @@ public class MovieService {
         // Prevent duplicate movies
         movies = movies.stream().distinct().collect(Collectors.toList());
 
-        // Apply sorting if specified
+        // Apply sorting if specified; default to deterministic movieId ASC
         if (sort != null && !sort.isBlank()) {
             String s = sort.trim().toLowerCase();
             if (s.startsWith("title")) {
-                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getTitle, String.CASE_INSENSITIVE_ORDER);
-                if (s.endsWith("desc")) comp = comp.reversed();
+                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getTitle, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(Movie::getMovieId);
+                if (s.endsWith("desc")) {
+                    comp = java.util.Comparator.comparing(Movie::getTitle, String.CASE_INSENSITIVE_ORDER).reversed()
+                            .thenComparing(Movie::getMovieId);
+                }
                 movies.sort(comp);
             } else if (s.startsWith("releasedate") || s.startsWith("release_date")) {
-                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getReleaseDate, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
-                if (s.endsWith("desc")) comp = comp.reversed();
+                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getReleaseDate, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
+                        .thenComparing(Movie::getMovieId);
+                if (s.endsWith("desc")) {
+                    comp = java.util.Comparator.comparing(Movie::getReleaseDate, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())).reversed()
+                            .thenComparing(Movie::getMovieId);
+                }
                 movies.sort(comp);
             } else if (s.startsWith("popularityscore") || s.startsWith("popularity_score")) {
-                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getPopularityScore, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
-                if (s.endsWith("desc")) comp = comp.reversed();
+                java.util.Comparator<Movie> comp = java.util.Comparator.comparing(Movie::getPopularityScore, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
+                        .thenComparing(Movie::getMovieId);
+                if (s.endsWith("desc")) {
+                    comp = java.util.Comparator.comparing(Movie::getPopularityScore, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())).reversed()
+                            .thenComparing(Movie::getMovieId);
+                }
                 movies.sort(comp);
+            } else {
+                // Unsupported sort parameter: deterministic fallback to default ordering (movieId ASC)
+                movies.sort(java.util.Comparator.comparing(Movie::getMovieId));
             }
+        } else {
+            // Default ordering: explicit and deterministic by movieId ASC
+            movies.sort(java.util.Comparator.comparing(Movie::getMovieId));
         }
 
         int start = (int) pageable.getOffset();

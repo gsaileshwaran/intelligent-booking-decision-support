@@ -446,6 +446,78 @@ public class P8CustomerDiscoveryIntegrationTest {
     }
 
     @Test
+    @DisplayName("P8-07b: Deterministic Default Ordering, Fallback on Unsupported Sort, and Pagination Stability Across Pages")
+    void testCatalogueDefaultOrderingAndPaginationStability() throws Exception {
+        // 1. Verify default ordering (sort absent) orders strictly by movieId ASC
+        MvcResult page0Result = mockMvc.perform(get("/api/v1/movies?page=0&size=5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.content").isArray())
+                .andReturn();
+
+        JsonNode page0Content = objectMapper.readTree(page0Result.getResponse().getContentAsString()).path("data").path("content");
+        assertTrue(page0Content.size() >= 2, "Page 0 must contain multiple movies for ordering verification");
+        for (int i = 0; i < page0Content.size() - 1; i++) {
+            long currentId = page0Content.get(i).path("movieId").asLong();
+            long nextId = page0Content.get(i + 1).path("movieId").asLong();
+            assertTrue(currentId < nextId, "Default ordering must be strictly ascending by movieId (current=" + currentId + ", next=" + nextId + ")");
+        }
+
+        // 2. Verify page 1 continues strictly ascending with disjoint IDs (pagination stability)
+        MvcResult page1Result = mockMvc.perform(get("/api/v1/movies?page=1&size=5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andReturn();
+
+        JsonNode page1Content = objectMapper.readTree(page1Result.getResponse().getContentAsString()).path("data").path("content");
+        assertTrue(page1Content.size() >= 2, "Page 1 must contain movies");
+        long maxPage0Id = page0Content.get(page0Content.size() - 1).path("movieId").asLong();
+        long minPage1Id = page1Content.get(0).path("movieId").asLong();
+        assertTrue(maxPage0Id < minPage1Id, "Pagination must be stable and disjoint: max(page0)=" + maxPage0Id + " must be < min(page1)=" + minPage1Id);
+
+        // 3. Repeated requests produce stable, identical results
+        MvcResult repeatResult = mockMvc.perform(get("/api/v1/movies?page=0&size=5"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode repeatContent = objectMapper.readTree(repeatResult.getResponse().getContentAsString()).path("data").path("content");
+        assertEquals(page0Content.toString(), repeatContent.toString(), "Repeated requests must return identical results");
+
+        // 4. Unsupported sort parameter gracefully falls back to deterministic movieId ASC
+        MvcResult unsupportedSortResult = mockMvc.perform(get("/api/v1/movies?sort=invalid_column&page=0&size=5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andReturn();
+        JsonNode unsupportedContent = objectMapper.readTree(unsupportedSortResult.getResponse().getContentAsString()).path("data").path("content");
+        for (int i = 0; i < unsupportedContent.size() - 1; i++) {
+            long currentId = unsupportedContent.get(i).path("movieId").asLong();
+            long nextId = unsupportedContent.get(i + 1).path("movieId").asLong();
+            assertTrue(currentId < nextId, "Unsupported sort must fall back to deterministic movieId ASC");
+        }
+
+        // 5. Explicit sort by title asc verifies actual ascending order
+        MvcResult titleAscResult = mockMvc.perform(get("/api/v1/movies?sort=title,asc&size=10"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode titleAscContent = objectMapper.readTree(titleAscResult.getResponse().getContentAsString()).path("data").path("content");
+        for (int i = 0; i < titleAscContent.size() - 1; i++) {
+            String currentTitle = titleAscContent.get(i).path("title").asText();
+            String nextTitle = titleAscContent.get(i + 1).path("title").asText();
+            assertTrue(currentTitle.compareToIgnoreCase(nextTitle) <= 0, "sort=title,asc must order by title ascending: '" + currentTitle + "' <= '" + nextTitle + "'");
+        }
+
+        // 6. Explicit sort by releaseDate desc verifies actual descending order
+        MvcResult releaseDescResult = mockMvc.perform(get("/api/v1/movies?sort=releaseDate,desc&size=10"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode releaseDescContent = objectMapper.readTree(releaseDescResult.getResponse().getContentAsString()).path("data").path("content");
+        for (int i = 0; i < releaseDescContent.size() - 1; i++) {
+            String currentRel = releaseDescContent.get(i).path("releaseDate").asText();
+            String nextRel = releaseDescContent.get(i + 1).path("releaseDate").asText();
+            assertTrue(currentRel.compareTo(nextRel) >= 0, "sort=releaseDate,desc must order by releaseDate descending: '" + currentRel + "' >= '" + nextRel + "'");
+        }
+    }
+
+    @Test
     @DisplayName("P8-08: Public Browsing Unauthenticated Accessibility (Zero Trust PermitAll)")
     void testPublicBrowsingPermitAll() throws Exception {
         // Confirm all discovery endpoints respond without Authorization header
