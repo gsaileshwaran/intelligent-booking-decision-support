@@ -8,7 +8,7 @@ import { moviesApi, decisionApi, systemApi } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import type { Movie } from '../../types/movie';
 import type { Show } from '../../types/show';
-import type { ShowRecommendationResponse, InteractionFriction } from '../../types/booking';
+import type { ShowRecommendationResponse } from '../../types/booking';
 import { ShowtimePill } from '../../components/cinema/ShowtimePill';
 import { DisplayOnlyBanner } from '../../components/common/DisplayOnlyBanner';
 
@@ -16,6 +16,7 @@ interface MovieDetailsViewProps {
   movieId: number;
   initialTheatreId?: number;
   initialDate?: string;
+  initialCityId?: number;
   onNavigate: (view: string, param?: any) => void;
 }
 
@@ -64,9 +65,16 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
   movieId,
   initialTheatreId,
   initialDate,
+  initialCityId,
   onNavigate,
 }) => {
-  const { selectedCityId } = useAuth();
+  const { selectedCityId, setSelectedCityId } = useAuth();
+
+  useEffect(() => {
+    if (initialCityId && initialCityId !== selectedCityId) {
+      setSelectedCityId(initialCityId);
+    }
+  }, [initialCityId]);
 
   const [movie, setMovie] = useState<Movie | null>(null);
   const [shows, setShows] = useState<Show[]>([]);
@@ -76,47 +84,53 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
   // Multiplex selection
   const [selectedTheatreId, setSelectedTheatreId] = useState<number | null>(initialTheatreId ?? null);
 
-  // Authoritative business date from backend provider (defaults to 2026-09-18)
-  const [businessDate, setBusinessDate] = useState<string>('2026-09-18');
+  // Authoritative business date from backend provider (7-day rolling window)
+  const [businessDate, setBusinessDate] = useState<string>('2026-10-11');
+  const [windowEndDate, setWindowEndDate] = useState<string>('2026-10-17');
   const [demoDates, setDemoDates] = useState<string[]>([]);
 
   useEffect(() => {
     systemApi.getBusinessDate()
       .then(info => {
         if (info.businessDate) setBusinessDate(info.businessDate);
+        if (info.windowEndDate) setWindowEndDate(info.windowEndDate);
         if (info.demoDates) setDemoDates(info.demoDates);
       })
       .catch(err => console.warn('Could not fetch business date:', err));
   }, []);
 
-  // Available schedule dates derived from actual shows and business date window
+  // Available schedule dates derived from actual shows within the 7-day rolling booking window
   const availableDates = useMemo(() => {
     const set = new Set<string>();
     shows.forEach((s) => {
-      if (s.startAt) {
-        const d = s.startAt.slice(0, 10);
-        // Only include dates on or after authoritative business date (no past dates for booking discovery)
-        if (d >= businessDate) {
+      const d = s.showDate || (s.startAt ? s.startAt.slice(0, 10) : '');
+      if (d) {
+        if (d >= businessDate && (!windowEndDate || d <= windowEndDate)) {
           set.add(d);
         }
       }
     });
     // Ensure all demo dates that have shows are present
     demoDates.forEach(d => {
-      if (shows.some(s => s.startAt?.startsWith(d))) {
+      if (shows.some(s => (s.showDate === d) || (s.startAt && s.startAt.startsWith(d)))) {
         set.add(d);
       }
     });
     return Array.from(set).sort();
-  }, [shows, businessDate, demoDates]);
+  }, [shows, demoDates, businessDate, windowEndDate]);
 
   const [selectedDate, setSelectedDate] = useState<string>(initialDate || '');
 
   useEffect(() => {
     if (availableDates.length > 0 && (!selectedDate || !availableDates.includes(selectedDate))) {
-      setSelectedDate(initialDate && availableDates.includes(initialDate) ? initialDate : availableDates[0]);
+      if (initialDate && availableDates.includes(initialDate)) {
+        setSelectedDate(initialDate);
+      } else {
+        const todayOrFuture = availableDates.find(d => d >= businessDate);
+        setSelectedDate(todayOrFuture || availableDates[0]);
+      }
     }
-  }, [availableDates, selectedDate, initialDate]);
+  }, [availableDates, selectedDate, initialDate, businessDate]);
 
   // Available multiplexes derived from shows
   const availableTheatres = useMemo(() => {
@@ -156,19 +170,18 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
   // Decision engine state
   const [showRec, setShowRec] = useState<ShowRecommendationResponse | null>(null);
   const [recLoading, setRecLoading] = useState(false);
-  const [frictionAlert, setFrictionAlert] = useState<InteractionFriction | null>(null);
-  const [filterChangeCount, setFilterChangeCount] = useState(0);
+  const [recError, setRecError] = useState<string | null>(null);
   const [showAllCandidates, setShowAllCandidates] = useState(false);
 
   // === Decision Panel Inputs ===
   const [priority, setPriority] = useState<Priority>('BALANCED');
   const [partySize, setPartySize] = useState(2);
-  const [languageCode, setLanguageCode] = useState('');
-  const [formatFilter, setFormatFilter] = useState('ALL');
-  const [timeFilter, setTimeFilter] = useState('ALL');
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
+  const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
+  const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState(initialDate || getISODate(0));
-  const [dateTo, setDateTo] = useState(initialDate || getISODate(7));
-  const [budgetTotal, setBudgetTotal] = useState('');
+  const [dateTo, setDateTo] = useState(initialDate || getISODate(6));
+  const [budgetPerPerson, setBudgetPerPerson] = useState('');
 
   // Sync dateFrom and dateTo when active calendar date changes
   useEffect(() => {
@@ -177,6 +190,15 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
       setDateTo(selectedDate);
     }
   }, [selectedDate]);
+
+  // Live calculation of maximum party budget
+  const calculatedPartyBudget = useMemo(() => {
+    const val = parseFloat(budgetPerPerson);
+    if (!isNaN(val) && val > 0) {
+      return val * partySize;
+    }
+    return null;
+  }, [budgetPerPerson, partySize]);
 
   // Simple showtimes panel filter (for the manual browse list below the AI panel)
   const [browseFormat, setBrowseFormat] = useState('ALL');
@@ -206,39 +228,30 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
   // Run recommendation engine
   const runDecisionEngine = useCallback(async () => {
     setRecLoading(true);
+    setRecError(null);
     setShowRec(null);
     try {
-      const params: any = {
+      const bPerPerson = budgetPerPerson ? parseFloat(budgetPerPerson) : undefined;
+      const rec = await decisionApi.getShowRecommendations(movieId, {
         cityId: selectedCityId || undefined,
         theatreId: selectedTheatreId || undefined,
         partySize,
         priority,
-      };
-      if (timeFilter !== 'ALL') params.timePreference = timeFilter;
-      if (languageCode) params.languageCode = languageCode;
-      if (formatFilter !== 'ALL') params.formatPreference = formatFilter;
-      if (dateFrom) params.dateFrom = dateFrom;
-      if (dateTo) params.dateTo = dateTo;
-      if (budgetTotal) params.budgetMaxTotal = parseFloat(budgetTotal);
-
-      const rec = await decisionApi.getShowRecommendations(movieId, params);
+        formats: selectedFormats.length > 0 ? selectedFormats : undefined,
+        languages: selectedLanguages.length > 0 ? selectedLanguages : undefined,
+        times: selectedTimes.length > 0 ? selectedTimes : undefined,
+        budgetPerPerson: bPerPerson && !isNaN(bPerPerson) && bPerPerson > 0 ? bPerPerson : undefined,
+        dateFrom,
+        dateTo,
+      });
       setShowRec(rec);
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Decision engine error:', err);
+      setRecError(err?.message || 'Recommendation service encountered an issue. Please retry.');
     } finally {
       setRecLoading(false);
     }
-  }, [movieId, selectedCityId, selectedTheatreId, priority, partySize, languageCode, formatFilter, timeFilter, dateFrom, dateTo, budgetTotal]);
-
-  const trackFilterChange = () => {
-    const count = filterChangeCount + 1;
-    setFilterChangeCount(count);
-    if (count >= 4) {
-      decisionApi.evaluateInteractionFriction({ filterChangeCount: count, timeWindowSeconds: 90 })
-        .then(res => { if (res?.detected) setFrictionAlert(res); })
-        .catch(() => {});
-    }
-  };
+  }, [movieId, selectedCityId, selectedTheatreId, priority, partySize, selectedLanguages, selectedFormats, selectedTimes, dateFrom, dateTo, budgetPerPerson]);
 
   // Browse-mode grouping: partitioned by active date and theatre (no multi-day duplicates)
   const { theatreGroups, totalScreeningsOnDate } = useMemo(() => {
@@ -247,7 +260,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
       filtered = filtered.filter((s) => s.theatreId === selectedTheatreId);
     }
     if (selectedDate) {
-      filtered = filtered.filter((s) => s.startAt && s.startAt.startsWith(selectedDate));
+      filtered = filtered.filter((s) => (s.showDate ? s.showDate === selectedDate : (s.startAt && s.startAt.startsWith(selectedDate))));
     }
     if (browseFormat !== 'ALL') {
       filtered = filtered.filter((s) => {
@@ -393,7 +406,8 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
 
         {/* === Decision Input Form === */}
         <div className="card" style={{ padding: '28px', marginBottom: '24px', border: '1px solid rgba(229,9,20,0.2)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
+          {/* Top Row: Date, Party Size, Budget, Multiplex */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '20px' }}>
 
             {/* Date From */}
             <div>
@@ -405,7 +419,8 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                 className="select"
                 value={dateFrom}
                 min={getISODate(0)}
-                onChange={e => { setDateFrom(e.target.value); trackFilterChange(); }}
+                max={getISODate(6)}
+                onChange={e => setDateFrom(e.target.value)}
                 style={{ width: '100%' }}
               />
             </div>
@@ -420,105 +435,53 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                 className="select"
                 value={dateTo}
                 min={dateFrom || getISODate(0)}
-                onChange={e => { setDateTo(e.target.value); trackFilterChange(); }}
+                max={getISODate(6)}
+                onChange={e => setDateTo(e.target.value)}
                 style={{ width: '100%' }}
               />
             </div>
 
-            {/* Seats */}
+            {/* Seats (Party Size) */}
             <div>
               <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                <Users size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Seats (Party Size)
+                <Users size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Party Size (Persons)
               </label>
               <input
+                id="input-party-size"
                 type="number"
                 className="select"
                 value={partySize}
                 min={1}
-                onChange={e => { setPartySize(Math.max(1, parseInt(e.target.value) || 1)); trackFilterChange(); }}
+                max={10}
+                onChange={e => setPartySize(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 style={{ width: '100%' }}
               />
             </div>
 
-            {/* Language */}
+            {/* Maximum Budget Per Person */}
             <div>
               <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                <Filter size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Language (Hard Filter)
-              </label>
-              <select
-                className="select"
-                value={languageCode}
-                onChange={e => { setLanguageCode(e.target.value); trackFilterChange(); }}
-                style={{ width: '100%' }}
-              >
-                <option value="">Any Language</option>
-                {movie.languages?.map(lang => (
-                  <option key={lang} value={lang.toLowerCase().slice(0, 2)}>
-                    {lang}
-                  </option>
-                ))}
-                <option value="en">English</option>
-                <option value="ta">Tamil</option>
-                <option value="hi">Hindi</option>
-                <option value="te">Telugu</option>
-                <option value="ml">Malayalam</option>
-                <option value="kn">Kannada</option>
-              </select>
-            </div>
-
-            {/* Format */}
-            <div>
-              <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                <Tv size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Format (Hard Filter)
-              </label>
-              <select
-                className="select"
-                value={formatFilter}
-                onChange={e => { setFormatFilter(e.target.value); trackFilterChange(); }}
-                style={{ width: '100%' }}
-              >
-                <option value="ALL">Any Format</option>
-                <option value="IMAX">IMAX Laser</option>
-                <option value="4DX">4DX Motion</option>
-                <option value="DOLBY">Dolby Atmos</option>
-                <option value="3D">RealD 3D</option>
-                <option value="2D">Standard 2D</option>
-              </select>
-            </div>
-
-            {/* Preferred Time */}
-            <div>
-              <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                <Clock size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Preferred Time
-              </label>
-              <select
-                className="select"
-                value={timeFilter}
-                onChange={e => { setTimeFilter(e.target.value); trackFilterChange(); }}
-                style={{ width: '100%' }}
-              >
-                <option value="ALL">Any Time</option>
-                <option value="MORNING">Morning (&lt;12 PM)</option>
-                <option value="AFTERNOON">Afternoon (12–4 PM)</option>
-                <option value="EVENING">Evening (4–8 PM)</option>
-                <option value="NIGHT">Night (&gt;8 PM)</option>
-              </select>
-            </div>
-
-            {/* Budget */}
-            <div>
-              <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                <DollarSign size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Max Budget (₹ total, optional)
+                <DollarSign size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Maximum budget per person (₹)
               </label>
               <input
+                id="input-budget-per-person"
                 type="number"
                 className="select"
-                placeholder="e.g. 800"
-                value={budgetTotal}
+                placeholder="e.g. 250 (optional)"
+                value={budgetPerPerson}
                 min={0}
-                onChange={e => { setBudgetTotal(e.target.value); trackFilterChange(); }}
+                onChange={e => setBudgetPerPerson(e.target.value)}
                 style={{ width: '100%' }}
               />
+              {calculatedPartyBudget !== null ? (
+                <div style={{ fontSize: '0.78rem', color: '#10b981', marginTop: '6px', fontWeight: 600 }}>
+                  Party Budget: ₹{calculatedPartyBudget.toLocaleString('en-IN')} (₹{budgetPerPerson} × {partySize} persons)
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  Optional · Estimates base ticket price with taxes
+                </div>
+              )}
             </div>
 
             {/* Multiplex / Theatre Filter */}
@@ -533,7 +496,6 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                 onChange={e => {
                   const val = e.target.value ? parseInt(e.target.value, 10) : null;
                   setSelectedTheatreId(val);
-                  trackFilterChange();
                 }}
                 style={{ width: '100%' }}
               >
@@ -542,6 +504,191 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                   <option key={t.id} value={String(t.id)}>{t.name}</option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* Multi-Select Group 1: Preferred Time Slots */}
+          <div style={{ marginTop: '16px', padding: '16px', background: 'var(--bg-elevated)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <label style={{ fontSize: '0.84rem', fontWeight: 600, color: '#e2e8f0' }}>
+                <Clock size={14} style={{ verticalAlign: 'middle', marginRight: '6px', color: '#f59e0b' }} />
+                Preferred Showtimes (Multi-Select)
+              </label>
+              <span style={{ fontSize: '0.75rem', color: selectedTimes.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                {selectedTimes.length > 0 ? `${selectedTimes.length} selected (OR matching)` : 'Any time permitted'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { id: 'MORNING', label: 'Morning', sub: '< 12 PM' },
+                { id: 'AFTERNOON', label: 'Afternoon', sub: '12 – 4 PM' },
+                { id: 'EVENING', label: 'Evening', sub: '4 – 8 PM' },
+                { id: 'NIGHT', label: 'Night', sub: '> 8 PM' },
+              ].map(t => {
+                const isSelected = selectedTimes.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    id={`time-chip-${t.id.toLowerCase()}`}
+                    onClick={() => {
+                      setSelectedTimes(prev =>
+                        prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id]
+                      );
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '20px',
+                      border: isSelected ? '1px solid #f59e0b' : '1px solid var(--border-subtle)',
+                      background: isSelected ? 'rgba(245,158,11,0.18)' : 'var(--bg-surface)',
+                      color: isSelected ? '#fbbf24' : 'var(--text-secondary)',
+                      fontSize: '0.82rem',
+                      fontWeight: isSelected ? 600 : 400,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <span>{t.label}</span>
+                    <span style={{ fontSize: '0.72rem', opacity: 0.75 }}>({t.sub})</span>
+                  </button>
+                );
+              })}
+              {selectedTimes.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => setSelectedTimes([])}
+                  style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                >
+                  Clear Time
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Multi-Select Group 2: Presentation Formats & Audio Capabilities */}
+          <div style={{ marginTop: '16px', padding: '16px', background: 'var(--bg-elevated)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <label style={{ fontSize: '0.84rem', fontWeight: 600, color: '#e2e8f0' }}>
+                <Tv size={14} style={{ verticalAlign: 'middle', marginRight: '6px', color: '#60a5fa' }} />
+                Presentation Format & Audio (Multi-Select)
+              </label>
+              <span style={{ fontSize: '0.75rem', color: selectedFormats.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                {selectedFormats.length > 0 ? `${selectedFormats.length} selected (OR matching)` : 'Any format permitted'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { id: '2D', label: 'Standard 2D', kind: 'Visual' },
+                { id: '3D', label: 'RealD 3D', kind: 'Visual' },
+                { id: 'IMAX', label: 'IMAX Laser', kind: 'Visual' },
+                { id: '4DX', label: '4DX Motion', kind: 'Visual' },
+                { id: 'DOLBY_ATMOS', label: 'Dolby Atmos', kind: 'Spatial Audio' },
+              ].map(f => {
+                const isSelected = selectedFormats.includes(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    id={`format-chip-${f.id.toLowerCase()}`}
+                    onClick={() => {
+                      setSelectedFormats(prev =>
+                        prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                      );
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '20px',
+                      border: isSelected ? '1px solid #60a5fa' : '1px solid var(--border-subtle)',
+                      background: isSelected ? 'rgba(96,165,250,0.18)' : 'var(--bg-surface)',
+                      color: isSelected ? '#93c5fd' : 'var(--text-secondary)',
+                      fontSize: '0.82rem',
+                      fontWeight: isSelected ? 600 : 400,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <span>{f.label}</span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.75 }}>[{f.kind}]</span>
+                  </button>
+                );
+              })}
+              {selectedFormats.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => setSelectedFormats([])}
+                  style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                >
+                  Clear Formats
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Multi-Select Group 3: Languages */}
+          <div style={{ marginTop: '16px', padding: '16px', background: 'var(--bg-elevated)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <label style={{ fontSize: '0.84rem', fontWeight: 600, color: '#e2e8f0' }}>
+                <Filter size={14} style={{ verticalAlign: 'middle', marginRight: '6px', color: '#c084fc' }} />
+                Language (Multi-Select)
+              </label>
+              <span style={{ fontSize: '0.75rem', color: selectedLanguages.length > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                {selectedLanguages.length > 0 ? `${selectedLanguages.length} selected (OR matching)` : 'Any language permitted'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { code: 'ta', label: 'Tamil' },
+                { code: 'en', label: 'English' },
+                { code: 'hi', label: 'Hindi' },
+                { code: 'te', label: 'Telugu' },
+                { code: 'ml', label: 'Malayalam' },
+                { code: 'kn', label: 'Kannada' },
+              ].map(lang => {
+                const isSelected = selectedLanguages.includes(lang.code);
+                return (
+                  <button
+                    key={lang.code}
+                    type="button"
+                    id={`language-chip-${lang.code}`}
+                    onClick={() => {
+                      setSelectedLanguages(prev =>
+                        prev.includes(lang.code) ? prev.filter(x => x !== lang.code) : [...prev, lang.code]
+                      );
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '20px',
+                      border: isSelected ? '1px solid #c084fc' : '1px solid var(--border-subtle)',
+                      background: isSelected ? 'rgba(192,132,252,0.18)' : 'var(--bg-surface)',
+                      color: isSelected ? '#e9d5ff' : 'var(--text-secondary)',
+                      fontSize: '0.82rem',
+                      fontWeight: isSelected ? 600 : 400,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {lang.label}
+                  </button>
+                );
+              })}
+              {selectedLanguages.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => setSelectedLanguages([])}
+                  style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                >
+                  Clear Languages
+                </button>
+              )}
             </div>
           </div>
 
@@ -558,7 +705,8 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                   <button
                     key={p}
                     id={`priority-${p.toLowerCase()}`}
-                    onClick={() => { setPriority(p); trackFilterChange(); }}
+                    type="button"
+                    onClick={() => setPriority(p)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -586,7 +734,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
             </p>
           </div>
 
-          {/* Action Button */}
+          {/* Action Buttons */}
           <div style={{ marginTop: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               id="btn-find-best-shows"
@@ -596,23 +744,23 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
               style={{ gap: '8px', fontWeight: 700 }}
             >
               <Zap size={16} />
-              {recLoading ? 'Finding Best Options...' : 'Find Best Shows'}
+              {recLoading ? 'Evaluating Candidates...' : 'Find Best Shows'}
             </button>
             <button
+              type="button"
               className="btn btn-sm btn-outline"
               onClick={() => {
                 setPriority('BALANCED');
                 setPartySize(2);
                 setSelectedTheatreId(initialTheatreId ?? null);
-                setLanguageCode('');
-                setFormatFilter('ALL');
-                setTimeFilter('ALL');
+                setSelectedLanguages([]);
+                setSelectedFormats([]);
+                setSelectedTimes([]);
                 setDateFrom(initialDate || getISODate(0));
-                setDateTo(initialDate || getISODate(7));
-                setBudgetTotal('');
-                setFrictionAlert(null);
-                setFilterChangeCount(0);
+                setDateTo(initialDate || getISODate(6));
+                setBudgetPerPerson('');
                 setShowRec(null);
+                setRecError(null);
               }}
             >
               Reset Constraints
@@ -620,22 +768,22 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
           </div>
         </div>
 
-        {/* Interaction Friction Alert */}
-        {frictionAlert?.detected && (
+        {/* API Error State */}
+        {recError && (
           <div style={{
-            padding: '12px 18px', marginBottom: '20px', borderRadius: '8px',
-            background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)',
+            padding: '16px 20px', marginBottom: '20px', borderRadius: '8px',
+            background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <AlertTriangle size={18} color="#f59e0b" />
+              <AlertTriangle size={20} color="#ef4444" />
               <div>
-                <span style={{ fontWeight: 600, fontSize: '0.88rem', color: '#fbbf24' }}>{frictionAlert.title}: </span>
-                <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>{frictionAlert.description}</span>
+                <span style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f87171' }}>Recommendation Engine Error: </span>
+                <span style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>{recError}</span>
               </div>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => setFrictionAlert(null)} style={{ fontSize: '0.78rem' }}>
-              Dismiss
+            <button className="btn btn-secondary btn-sm" onClick={runDecisionEngine} style={{ fontSize: '0.78rem' }}>
+              Retry
             </button>
           </div>
         )}
@@ -649,7 +797,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
         )}
 
         {/* Idle state — user has not yet clicked Find Best Shows */}
-        {!recLoading && !showRec && (
+        {!recLoading && !showRec && !recError && (
           <div style={{
             textAlign: 'center', padding: '36px 20px',
             background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)',
@@ -657,22 +805,31 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
           }}>
             <Sparkles size={24} color="var(--text-muted)" style={{ marginBottom: '10px' }} />
             <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>
-              Configure your preferences above, then click <strong style={{ color: 'var(--accent-crimson)' }}>Find Best Shows</strong> to get AI-ranked recommendations.
+              Configure your preferences above, then click <strong style={{ color: 'var(--accent-crimson)' }}>Find Best Shows</strong> to evaluate and rank eligible shows.
             </p>
           </div>
         )}
 
+        {/* Candidate Results */}
         {!recLoading && showRec && showRec.preferredOption && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Conflict Analysis Banner */}
+            {/* Conflict Analysis & Diagnostics Banner */}
             {showRec.conflictAnalysis && (
               <div style={{
-                padding: '10px 16px', borderRadius: '8px',
+                padding: '12px 18px', borderRadius: '8px',
                 background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
-                fontSize: '0.83rem', color: '#a5b4fc',
+                fontSize: '0.85rem', color: '#a5b4fc',
               }}>
-                <TrendingUp size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                {showRec.conflictAnalysis}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <TrendingUp size={15} />
+                  <span style={{ fontWeight: 600 }}>Evaluation Summary:</span>
+                  <span>{showRec.conflictAnalysis}</span>
+                </div>
+                {showRec.totalShowsEvaluated != null && (
+                  <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: '4px' }}>
+                    Evaluated {showRec.totalShowsEvaluated} candidate shows in window · {showRec.eligibleCandidatesCount ?? showRec.candidates.length} eligible options ranked
+                  </div>
+                )}
               </div>
             )}
 
@@ -737,7 +894,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                         )}
                       </div>
 
-                      {/* Reasons */}
+                      {/* Reasons grounded in real evaluated data */}
                       {c.reasons && c.reasons.length > 0 && (
                         <ul style={{ margin: '0 0 6px 0', paddingLeft: '18px', fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.55 }}>
                           {c.reasons.map((r, i) => <li key={i} style={{ color: '#e2e8f0' }}>{r}</li>)}
@@ -839,20 +996,114 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
           </div>
         )}
 
-        {/* No results from engine */}
+        {/* Truthful Empty Results State */}
         {!recLoading && showRec && !showRec.preferredOption && (
           <div className="card" style={{ padding: '32px', textAlign: 'center', border: '1px solid rgba(245,158,11,0.25)' }}>
-            <AlertTriangle size={28} color="#f59e0b" style={{ marginBottom: '12px' }} />
-            <h3 style={{ marginBottom: '8px' }}>No Shows Match Your Constraints</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '0.9rem' }}>
-              {showRec.conflictAnalysis || 'Try relaxing one or more constraints.'}
+            <AlertTriangle size={32} color="#f59e0b" style={{ marginBottom: '12px' }} />
+            <h3 style={{ marginBottom: '8px', fontSize: '1.15rem' }}>No Shows Match Your Constraints</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '18px', fontSize: '0.9rem', maxWidth: '640px', margin: '0 auto 18px auto', lineHeight: 1.5 }}>
+              {showRec.conflictAnalysis || 'None of the scheduled shows satisfied all selected criteria.'}
             </p>
+
+            {/* Accurate Diagnostics Breakdown Table / Chips */}
+            {showRec.totalShowsEvaluated != null && (
+              <div style={{
+                background: 'var(--bg-elevated)', padding: '16px', borderRadius: '8px',
+                maxWidth: '680px', margin: '0 auto 20px auto', border: '1px solid var(--border-subtle)',
+                textAlign: 'left'
+              }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Candidate Evaluation Diagnostics
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', fontSize: '0.82rem' }}>
+                  <div style={{ padding: '8px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+                    <div style={{ color: 'var(--text-muted)' }}>Evaluated Shows</div>
+                    <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#e2e8f0' }}>{showRec.totalShowsEvaluated}</div>
+                  </div>
+                  {showRec.excludedSeats ? (
+                    <div style={{ padding: '8px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+                      <div style={{ color: '#f87171' }}>Insufficient Seats</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#f87171' }}>{showRec.excludedSeats}</div>
+                    </div>
+                  ) : null}
+                  {showRec.excludedFormat ? (
+                    <div style={{ padding: '8px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+                      <div style={{ color: '#60a5fa' }}>Format Filter</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#60a5fa' }}>{showRec.excludedFormat}</div>
+                    </div>
+                  ) : null}
+                  {showRec.excludedLanguage ? (
+                    <div style={{ padding: '8px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+                      <div style={{ color: '#c084fc' }}>Language Filter</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#c084fc' }}>{showRec.excludedLanguage}</div>
+                    </div>
+                  ) : null}
+                  {showRec.excludedTime ? (
+                    <div style={{ padding: '8px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+                      <div style={{ color: '#fbbf24' }}>Time Filter</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#fbbf24' }}>{showRec.excludedTime}</div>
+                    </div>
+                  ) : null}
+                  {showRec.excludedBudget ? (
+                    <div style={{ padding: '8px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+                      <div style={{ color: '#34d399' }}>Budget Limit</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#34d399' }}>{showRec.excludedBudget}</div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
+            {/* Actionable Relaxation Buttons */}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button className="btn btn-sm btn-outline" onClick={() => { setFormatFilter('ALL'); setLanguageCode(''); setBudgetTotal(''); runDecisionEngine(); }}>
-                Remove Format & Language Filters
-              </button>
-              <button className="btn btn-sm btn-outline" onClick={() => { setDateFrom(getISODate(0)); setDateTo(getISODate(30)); runDecisionEngine(); }}>
-                Expand to 30-Day Window
+              {selectedFormats.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => { setSelectedFormats([]); }}
+                >
+                  Clear Formats ({selectedFormats.length})
+                </button>
+              )}
+              {selectedLanguages.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => { setSelectedLanguages([]); }}
+                >
+                  Clear Languages ({selectedLanguages.length})
+                </button>
+              )}
+              {selectedTimes.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => { setSelectedTimes([]); }}
+                >
+                  Clear Time Slots ({selectedTimes.length})
+                </button>
+              )}
+              {budgetPerPerson && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => { setBudgetPerPerson(''); }}
+                >
+                  Clear Budget Limit
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => {
+                  setSelectedFormats([]);
+                  setSelectedLanguages([]);
+                  setSelectedTimes([]);
+                  setBudgetPerPerson('');
+                  setPartySize(2);
+                }}
+              >
+                Reset All Active Constraints
               </button>
             </div>
           </div>
@@ -892,7 +1143,7 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
                 }}
                 style={{ fontSize: '0.85rem', height: '34px', padding: '6px 12px' }}
               >
-                <option value="">All Multiplexes ({availableTheatres.length})</option>
+                <option value="">{availableTheatres.length > 0 ? `All Multiplexes (${availableTheatres.length})` : 'All Multiplexes'}</option>
                 {availableTheatres.map(t => (
                   <option key={t.id} value={String(t.id)}>{t.name}</option>
                 ))}
@@ -925,6 +1176,33 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Date Selector Ribbon Header & Jump Input */}
+        {availableDates.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              {availableDates.length} scheduled dates available (7-day booking window)
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Calendar size={14} color="var(--accent-crimson)" />
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Jump to Date:</span>
+              <input
+                id="input-jump-to-date"
+                type="date"
+                className="input"
+                style={{ width: '150px', height: '32px', fontSize: '0.82rem', padding: '2px 8px' }}
+                value={selectedDate}
+                min={businessDate}
+                max={windowEndDate || availableDates[availableDates.length - 1]}
+                onChange={e => {
+                  if (e.target.value) {
+                    setSelectedDate(e.target.value);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Date Selector Ribbon */}
         {availableDates.length > 0 && (
@@ -978,8 +1256,56 @@ export const MovieDetailsView: React.FC<MovieDetailsViewProps> = ({
 
         {theatreGroups.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
-            <h3>No Showtimes Match Filters</h3>
-            <p style={{ marginTop: '8px' }}>Try adjusting your format or timing filters above.</p>
+            {movie?.movieStatus === 'ENDED' || movie?.lifecycleStage === 'ENDED' ? (
+              <>
+                <Calendar size={48} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
+                <h3>Theatrical Run Completed</h3>
+                <p style={{ marginTop: '8px', color: 'var(--text-secondary)' }}>
+                  This title's exhibition run ended on {movie.exhibitionEndDate ? formatFullDate(movie.exhibitionEndDate) : 'an earlier date'}. No further showtimes are scheduled.
+                </p>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => onNavigate('movies')}
+                  style={{ marginTop: '16px' }}
+                >
+                  Browse Now Showing Movies
+                </button>
+              </>
+            ) : shows.length === 0 ? (
+              <>
+                <Calendar size={48} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
+                <h3>No Showtimes Scheduled</h3>
+                <p style={{ marginTop: '8px', color: 'var(--text-secondary)' }}>
+                  No screenings scheduled for this title within the active 7-day booking window ({businessDate} to {windowEndDate}){selectedCityId ? ' in the selected city' : ''}.
+                </p>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => onNavigate('movies')}
+                  style={{ marginTop: '16px' }}
+                >
+                  Explore Other Movies
+                </button>
+              </>
+            ) : (
+              <>
+                <Calendar size={48} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
+                <h3>No Showtimes Match Filters</h3>
+                <p style={{ marginTop: '8px', color: 'var(--text-secondary)' }}>
+                  No showtimes match your current filters on this date. Try adjusting your multiplex, format, or timing selection.
+                </p>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setSelectedTheatreId(null);
+                    setBrowseFormat('ALL');
+                    setBrowseTime('ALL');
+                  }}
+                  style={{ marginTop: '16px' }}
+                >
+                  Reset Showtimes Filters
+                </button>
+              </>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>

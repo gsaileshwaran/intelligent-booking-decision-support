@@ -57,4 +57,5 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     List<Show> findByScreenIdAndShowDate(Long screenId, java.time.LocalDate showDate);
     List<Show> findByScreenIdInAndShowDate(List<Long> screenIds, java.time.LocalDate showDate);
     List<Show> findByScreenIdIn(List<Long> screenIds);
+    List<Show> findByShowDate(java.time.LocalDate showDate);
 }

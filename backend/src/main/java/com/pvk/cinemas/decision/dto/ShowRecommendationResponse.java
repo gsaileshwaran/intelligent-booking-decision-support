@@ -13,6 +13,17 @@ public class ShowRecommendationResponse {
     private List<ShowCandidateDTO> candidates = new ArrayList<>();
     private String conflictAnalysis;
 
+    // Diagnostic evaluation counts
+    private int totalShowsEvaluated;
+    private int eligibleCandidatesCount;
+    private int excludedCity;
+    private int excludedDate;
+    private int excludedLanguage;
+    private int excludedFormat;
+    private int excludedTime;
+    private int excludedSeats;
+    private int excludedBudget;
+
     public ShowRecommendationResponse() {}
 
     public ShowRecommendationResponse(Long movieId, String movieTitle, Long cityId, String cityName,
@@ -25,6 +36,7 @@ public class ShowRecommendationResponse {
         this.preferredOption = preferredOption;
         this.candidates = candidates;
         this.conflictAnalysis = conflictAnalysis;
+        this.eligibleCandidatesCount = candidates != null ? candidates.size() : 0;
     }
 
     public Long getMovieId() { return movieId; }
@@ -49,4 +61,31 @@ public class ShowRecommendationResponse {
 
     public String getConflictAnalysis() { return conflictAnalysis; }
     public void setConflictAnalysis(String conflictAnalysis) { this.conflictAnalysis = conflictAnalysis; }
+
+    public int getTotalShowsEvaluated() { return totalShowsEvaluated; }
+    public void setTotalShowsEvaluated(int totalShowsEvaluated) { this.totalShowsEvaluated = totalShowsEvaluated; }
+
+    public int getEligibleCandidatesCount() { return eligibleCandidatesCount; }
+    public void setEligibleCandidatesCount(int eligibleCandidatesCount) { this.eligibleCandidatesCount = eligibleCandidatesCount; }
+
+    public int getExcludedCity() { return excludedCity; }
+    public void setExcludedCity(int excludedCity) { this.excludedCity = excludedCity; }
+
+    public int getExcludedDate() { return excludedDate; }
+    public void setExcludedDate(int excludedDate) { this.excludedDate = excludedDate; }
+
+    public int getExcludedLanguage() { return excludedLanguage; }
+    public void setExcludedLanguage(int excludedLanguage) { this.excludedLanguage = excludedLanguage; }
+
+    public int getExcludedFormat() { return excludedFormat; }
+    public void setExcludedFormat(int excludedFormat) { this.excludedFormat = excludedFormat; }
+
+    public int getExcludedTime() { return excludedTime; }
+    public void setExcludedTime(int excludedTime) { this.excludedTime = excludedTime; }
+
+    public int getExcludedSeats() { return excludedSeats; }
+    public void setExcludedSeats(int excludedSeats) { this.excludedSeats = excludedSeats; }
+
+    public int getExcludedBudget() { return excludedBudget; }
+    public void setExcludedBudget(int excludedBudget) { this.excludedBudget = excludedBudget; }
 }

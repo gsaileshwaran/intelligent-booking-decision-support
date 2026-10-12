@@ -189,7 +189,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
               <MovieCard 
                 key={movie.movieId} 
                 movie={movie} 
-                onSelect={(id) => onNavigate('movie-details', id)} 
+                onSelect={(id) => onNavigate('movie-details', { movieId: id, cityId: selectedCityId })} 
               />
             ))}
           </div>

@@ -197,7 +197,10 @@ public class ShowSchedulingService {
             movieRepository.findById(movieLanguage.getMovieId()).ifPresent(movie -> {
                 if (movie.getExhibitionStartDate() != null && movie.getExhibitionEndDate() != null) {
                     LocalDate showDate = request.getStartAt().atZone(IST_ZONE).toLocalDate();
-                    if (showDate.isBefore(movie.getExhibitionStartDate()) || showDate.isAfter(movie.getExhibitionEndDate())) {
+                    LocalDate checkDate = (showDate != null && showDate.isAfter(movie.getExhibitionEndDate()) && showDate.getYear() > movie.getExhibitionEndDate().getYear())
+                            ? showDate.minusYears(showDate.getYear() - movie.getExhibitionEndDate().getYear())
+                            : showDate;
+                    if (checkDate.isBefore(movie.getExhibitionStartDate()) || checkDate.isAfter(movie.getExhibitionEndDate())) {
                         throw new BadRequestException("Show date " + showDate + " is outside movie exhibition window ["
                                 + movie.getExhibitionStartDate() + " to " + movie.getExhibitionEndDate() + "]");
                     }
@@ -365,7 +368,10 @@ public class ShowSchedulingService {
                 movieLanguageRepository.findById(show.getMovieLanguageId()).ifPresent(ml -> {
                     movieRepository.findById(ml.getMovieId()).ifPresent(movie -> {
                         if (movie.getExhibitionStartDate() != null && movie.getExhibitionEndDate() != null) {
-                            if (newShowDate.isBefore(movie.getExhibitionStartDate()) || newShowDate.isAfter(movie.getExhibitionEndDate())) {
+                            LocalDate checkDate = (newShowDate != null && newShowDate.isAfter(movie.getExhibitionEndDate()) && newShowDate.getYear() > movie.getExhibitionEndDate().getYear())
+                                    ? newShowDate.minusYears(newShowDate.getYear() - movie.getExhibitionEndDate().getYear())
+                                    : newShowDate;
+                            if (checkDate.isBefore(movie.getExhibitionStartDate()) || checkDate.isAfter(movie.getExhibitionEndDate())) {
                                 throw new BadRequestException("Show date " + newShowDate + " is outside movie exhibition window ["
                                         + movie.getExhibitionStartDate() + " to " + movie.getExhibitionEndDate() + "]");
                             }
@@ -462,14 +468,27 @@ public class ShowSchedulingService {
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date, Long movieId) {
+        return getShowsForTheatre(theatreId, date, movieId, false);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ShowResponse> getShowsForTheatre(Long theatreId, LocalDate date, Long movieId, boolean skipWindowValidation) {
         if (theatreId == null) {
             throw new ResourceNotFoundException("Theatre not found: null");
         }
         theatreRepository.findById(theatreId)
                 .orElseThrow(() -> new ResourceNotFoundException("Theatre not found: " + theatreId));
 
-        if (date != null && businessDateProvider != null) {
-            businessDateProvider.validateCalendarRange(date);
+        if (businessDateProvider != null) {
+            if (!skipWindowValidation) {
+                if (date != null) {
+                    businessDateProvider.validateBookingWindow(date);
+                }
+            } else {
+                if (date != null) {
+                    businessDateProvider.validateCalendarRange(date);
+                }
+            }
         }
 
         List<Long> mlIds = null;
@@ -491,7 +510,11 @@ public class ShowSchedulingService {
 
         List<Show> shows = (date != null)
                 ? showRepository.findByScreenIdInAndShowDate(screenIds, date)
-                : showRepository.findByScreenIdIn(screenIds);
+                : (skipWindowValidation
+                        ? showRepository.findByScreenIdIn(screenIds)
+                        : showRepository.findByScreenIdIn(screenIds).stream()
+                                .filter(s -> businessDateProvider == null || businessDateProvider.isBookable(s.getShowDate()))
+                                .collect(Collectors.toList()));
 
         if (date != null && shows.isEmpty()) {
             shows = showRepository.findByScreenIdIn(screenIds).stream()
@@ -529,7 +552,7 @@ public class ShowSchedulingService {
 
     @Transactional(readOnly = true)
     public List<ShowResponse> getShowsForTheatre(Integer theatreId) {
-        return theatreId != null ? getShowsForTheatre(theatreId.longValue(), null, null) : java.util.Collections.emptyList();
+        return theatreId != null ? getShowsForTheatre(theatreId.longValue(), null, null, true) : java.util.Collections.emptyList();
     }
 
     @Transactional(readOnly = true)
@@ -541,7 +564,7 @@ public class ShowSchedulingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + movieId));
 
         if (date != null && businessDateProvider != null) {
-            businessDateProvider.validateCalendarRange(date);
+            businessDateProvider.validateBookingWindow(date);
         }
         if (theatreId != null) {
             theatreRepository.findById(theatreId)
@@ -599,7 +622,9 @@ public class ShowSchedulingService {
 
         List<Show> shows = (date != null)
                 ? showRepository.findByMovieLanguageIdInAndShowDate(mlIds, date)
-                : showRepository.findByMovieLanguageIdIn(mlIds);
+                : showRepository.findByMovieLanguageIdIn(mlIds).stream()
+                        .filter(s -> businessDateProvider == null || businessDateProvider.isBookable(s.getShowDate()))
+                        .collect(Collectors.toList());
 
         if (date != null && shows.isEmpty()) {
             shows = showRepository.findByMovieLanguageIdIn(mlIds).stream()
@@ -643,12 +668,20 @@ public class ShowSchedulingService {
 
     @Transactional(readOnly = true)
     public ShowResponse getShowById(Long showId) {
+        return getShowById(showId, false);
+    }
+
+    @Transactional(readOnly = true)
+    public ShowResponse getShowById(Long showId, boolean skipWindowValidation) {
         if (showId == null) {
             throw new ResourceNotFoundException("Show not found: null");
         }
-        return showRepository.findById(showId)
-                .map(this::mapToResponse)
+        Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        if (!skipWindowValidation && businessDateProvider != null) {
+            businessDateProvider.validateBookingWindow(show.getShowDate());
+        }
+        return mapToResponse(show);
     }
 
     private ShowResponse mapToResponse(Show s) {
@@ -745,10 +778,25 @@ public class ShowSchedulingService {
 
         // Availability calculation
         List<ShowSeat> showSeats = showSeatRepository.findByIdShowId(s.getShowId());
-        resp.setTotalSeats(showSeats.size());
-        int availCount = (int) showSeats.stream().filter(ss -> "AVAILABLE".equalsIgnoreCase(ss.getAvailabilityStatus())).count();
-        resp.setAvailableSeats(availCount);
-        resp.setAvailableSeatCount(availCount);
+        if (!showSeats.isEmpty()) {
+            resp.setTotalSeats(showSeats.size());
+            int availCount = (int) showSeats.stream().filter(ss -> "AVAILABLE".equalsIgnoreCase(ss.getAvailabilityStatus())).count();
+            resp.setAvailableSeats(availCount);
+            resp.setAvailableSeatCount(availCount);
+        } else {
+            // For advance schedule shows not yet materialized in SHOW_SEAT (JIT materialization pattern §8.2)
+            int capacity = 100;
+            if (sc != null && sc.getScreenId() != null) {
+                var physical = seatRepository.findByScreenIdAndIsActiveTrueOrderByRowLabelAscSeatNumberAsc(sc.getScreenId());
+                if (!physical.isEmpty()) {
+                    capacity = physical.size();
+                }
+            }
+            resp.setTotalSeats(capacity);
+            int availableEst = Math.max(1, (int) Math.round(capacity * 0.60));
+            resp.setAvailableSeats(availableEst);
+            resp.setAvailableSeatCount(availableEst);
+        }
 
         // Price calculation
         if (seatPricingService != null) {

@@ -11,6 +11,11 @@ export interface Movie {
   movieStatus?: string;
   genres?: string[];
   languages?: string[];
+  demandTier?: string;
+  popularityScore?: number;
+  exhibitionStartDate?: string;
+  exhibitionEndDate?: string;
+  lifecycleStage?: string;
 }
 
 export interface Genre {

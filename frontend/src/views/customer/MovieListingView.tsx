@@ -147,7 +147,7 @@ export const MovieListingView: React.FC<MovieListingViewProps> = ({ onNavigate }
             <MovieCard
               key={movie.movieId}
               movie={movie}
-              onSelect={(id) => onNavigate('movie-details', id)}
+              onSelect={(id) => onNavigate('movie-details', { movieId: id, cityId: selectedCityId })}
             />
           ))}
         </div>

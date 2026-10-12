@@ -43,8 +43,16 @@ function hashToRoute(hash: string): { view: string; param: any } {
     return { view: 'movies', param: null };
   }
   if (clean.startsWith('movie/')) {
-    const id = clean.split('/')[1];
-    return { view: 'movie-details', param: Number(id) || 1 };
+    const rest = clean.substring(6);
+    const [pathPart, queryPart] = rest.split('?');
+    const id = Number(pathPart) || 5;
+    let cityId: number | undefined;
+    if (queryPart) {
+      const qParams = new URLSearchParams(queryPart);
+      const c = qParams.get('cityId');
+      if (c) cityId = Number(c);
+    }
+    return { view: 'movie-details', param: { movieId: id, cityId } };
   }
   if (clean.startsWith('search')) {
     const qIndex = clean.indexOf('?q=');
@@ -128,7 +136,11 @@ function routeToHash(view: string, param?: any): string {
   switch (view) {
     case 'home': return '#/home';
     case 'movies': return '#/movies';
-    case 'movie-details': return `#/movie/${(typeof param === 'object' && param !== null) ? (param.movieId || 1) : (param || 1)}`;
+    case 'movie-details': {
+      const mId = (typeof param === 'object' && param !== null) ? (param.movieId || 1) : (param || 1);
+      const cId = (typeof param === 'object' && param !== null) ? param.cityId : undefined;
+      return `#/movie/${mId}${cId ? `?cityId=${cId}` : ''}`;
+    }
     case 'search': return param ? `#/search?q=${encodeURIComponent(String(param))}` : '#/search';
     case 'theatres': return '#/theatres';
     case 'theatre-details': return `#/theatre/${(typeof param === 'object' && param !== null) ? (param.theatreId || 1) : (param || 1)}`;
@@ -211,10 +223,11 @@ export function AppContent() {
       case 'movies':
         return <MovieListingView onNavigate={navigate} />;
       case 'movie-details': {
-        const movieId = typeof viewParam === 'object' && viewParam !== null ? Number(viewParam.movieId) || 1 : (Number(viewParam) || 1);
+        const movieId = typeof viewParam === 'object' && viewParam !== null ? Number(viewParam.movieId) || 5 : (Number(viewParam) || 5);
         const initialTheatreId = typeof viewParam === 'object' && viewParam !== null ? viewParam.theatreId : undefined;
         const initialDate = typeof viewParam === 'object' && viewParam !== null ? viewParam.date : undefined;
-        return <MovieDetailsView movieId={movieId} initialTheatreId={initialTheatreId} initialDate={initialDate} onNavigate={navigate} />;
+        const initialCityId = typeof viewParam === 'object' && viewParam !== null ? viewParam.cityId : undefined;
+        return <MovieDetailsView movieId={movieId} initialTheatreId={initialTheatreId} initialDate={initialDate} initialCityId={initialCityId} onNavigate={navigate} />;
       }
       case 'search':
         return <SearchResultsView initialQuery={String(viewParam || '')} onNavigate={navigate} />;

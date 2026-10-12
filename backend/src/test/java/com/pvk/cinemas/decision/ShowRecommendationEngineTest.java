@@ -108,6 +108,9 @@ class ShowRecommendationEngineTest {
         Language langTa = new Language(2L, "ta", "Tamil");
         when(languageRepository.findByLanguageCode("en")).thenReturn(Optional.of(langEn));
         when(languageRepository.findByLanguageCode("ta")).thenReturn(Optional.of(langTa));
+        when(languageRepository.findById(1L)).thenReturn(Optional.of(langEn));
+        when(languageRepository.findById(2L)).thenReturn(Optional.of(langTa));
+        when(languageRepository.findAll()).thenReturn(List.of(langEn, langTa));
 
         MovieLanguage mlEn = new MovieLanguage(680L, 1L, "ORIGINAL");
         mlEn.setMovieLanguageId(10L);
@@ -122,11 +125,13 @@ class ShowRecommendationEngineTest {
         theatreChennai.setCityId(1L);
         theatreChennai.setTheatreName("PVK INOX Chennai");
         when(theatreRepository.findById(791L)).thenReturn(Optional.of(theatreChennai));
+        when(theatreRepository.findAll()).thenReturn(List.of(theatreChennai));
 
         // Screen & Capability
         Screen screen1 = new Screen(791L, "SCR-1", "Screen 1 IMAX");
         screen1.setScreenId(501L);
         when(screenRepository.findById(501L)).thenReturn(Optional.of(screen1));
+        when(screenRepository.findAll()).thenReturn(List.of(screen1));
 
         ScreenCapability capImax = new ScreenCapability(501L, 3L, 1L);
         capImax.setScreenCapabilityId(901L);
@@ -134,6 +139,7 @@ class ShowRecommendationEngineTest {
 
         PresentationFormat imaxFormat = new PresentationFormat(3L, "IMAX", "IMAX Experience", null);
         when(presentationFormatRepository.findById(3L)).thenReturn(Optional.of(imaxFormat));
+        when(presentationFormatRepository.findAll()).thenReturn(List.of(imaxFormat));
 
         // Shows (Date: 2026-09-20)
         // 18:30 IST is 13:00 UTC
@@ -390,5 +396,145 @@ class ShowRecommendationEngineTest {
         assertTrue(res.getCandidates().get(1).getMatchScore() > 0);
         assertNotNull(res.getConflictAnalysis());
         assertTrue(res.getConflictAnalysis().contains("Balanced ranking"));
+    }
+
+    @Test
+    @DisplayName("Multi-select Preferred Times: Morning only yields 0 candidates (truthful empty state)")
+    void testMultiSelectTime_morningOnlyYieldsZero() {
+        ShowRecommendationRequest req = new ShowRecommendationRequest();
+        req.setCityId(1L);
+        req.setPartySize(2);
+        req.setPreferredTimes(List.of("MORNING"));
+
+        ShowRecommendationResponse res = engine.recommendShows(680L, req);
+        assertNotNull(res);
+        assertEquals(0, res.getCandidates().size());
+        assertNull(res.getPreferredOption());
+        assertEquals(2, res.getExcludedTime());
+        assertNotNull(res.getConflictAnalysis());
+        assertTrue(res.getConflictAnalysis().contains("preferred time"));
+    }
+
+    @Test
+    @DisplayName("Multi-select Preferred Times: Morning and Evening together matches Show A (Evening)")
+    void testMultiSelectTime_morningAndEveningTogetherMatchesShowA() {
+        ShowRecommendationRequest req = new ShowRecommendationRequest();
+        req.setCityId(1L);
+        req.setPartySize(2);
+        req.setPreferredTimes(List.of("MORNING", "EVENING"));
+
+        ShowRecommendationResponse res = engine.recommendShows(680L, req);
+        assertNotNull(res);
+        assertEquals(1, res.getCandidates().size());
+        assertEquals(3001L, res.getCandidates().get(0).getShowId(), "Show A (18:30 Evening) must match");
+        assertEquals(1, res.getExcludedTime(), "Show B (14:00 Afternoon) must be excluded");
+    }
+
+    @Test
+    @DisplayName("Multi-select Preferred Times: Afternoon and Evening together matches both shows (OR semantics)")
+    void testMultiSelectTime_afternoonAndEveningOrSemantics() {
+        ShowRecommendationRequest req = new ShowRecommendationRequest();
+        req.setCityId(1L);
+        req.setPartySize(2);
+        req.setPreferredTimes(List.of("AFTERNOON", "EVENING"));
+
+        ShowRecommendationResponse res = engine.recommendShows(680L, req);
+        assertNotNull(res);
+        assertEquals(2, res.getCandidates().size());
+        assertEquals(0, res.getExcludedTime());
+    }
+
+    @Test
+    @DisplayName("Multi-select Presentation Formats: OR semantics and non-matching exclusions")
+    void testMultiSelectFormats() {
+        // 4DX only -> none match (both are IMAX)
+        ShowRecommendationRequest req4dx = new ShowRecommendationRequest();
+        req4dx.setCityId(1L);
+        req4dx.setPartySize(2);
+        req4dx.setPreferredFormats(List.of("4DX"));
+
+        ShowRecommendationResponse res4dx = engine.recommendShows(680L, req4dx);
+        assertEquals(0, res4dx.getCandidates().size());
+        assertEquals(2, res4dx.getExcludedFormat());
+
+        // IMAX and 4DX together -> matches IMAX shows via OR semantics
+        ShowRecommendationRequest reqCombined = new ShowRecommendationRequest();
+        reqCombined.setCityId(1L);
+        reqCombined.setPartySize(2);
+        reqCombined.setPreferredFormats(List.of("IMAX", "4DX"));
+
+        ShowRecommendationResponse resCombined = engine.recommendShows(680L, reqCombined);
+        assertEquals(2, resCombined.getCandidates().size());
+        assertEquals(0, resCombined.getExcludedFormat());
+    }
+
+    @Test
+    @DisplayName("Multi-select Languages: OR semantics within languages")
+    void testMultiSelectLanguages() {
+        // Tamil and English together matches English movie shows
+        ShowRecommendationRequest req = new ShowRecommendationRequest();
+        req.setCityId(1L);
+        req.setPartySize(2);
+        req.setPreferredLanguages(List.of("ta", "en"));
+
+        ShowRecommendationResponse res = engine.recommendShows(680L, req);
+        assertEquals(2, res.getCandidates().size());
+
+        // Tamil only yields 0 because movie has English
+        ShowRecommendationRequest reqTa = new ShowRecommendationRequest();
+        reqTa.setCityId(1L);
+        reqTa.setPartySize(2);
+        reqTa.setPreferredLanguages(List.of("ta"));
+
+        ShowRecommendationResponse resTa = engine.recommendShows(680L, reqTa);
+        assertEquals(0, resTa.getCandidates().size());
+    }
+
+    @Test
+    @DisplayName("Budget: Per-person budget automatically calculates party total and filters accurately")
+    void testBudgetPerPersonEvaluation() {
+        // Show A = ₹250/ticket, Show B = ₹150/ticket
+        // Party size = 4
+        // Per-person budget = ₹200 -> Party budget = ₹800
+        // Show A total = ₹1000 (> 800) -> Excluded
+        // Show B total = ₹600 (<= 800) -> Eligible
+        ShowRecommendationRequest req = new ShowRecommendationRequest();
+        req.setCityId(1L);
+        req.setPartySize(4);
+        req.setBudgetPerPerson(new BigDecimal("200.00"));
+
+        ShowRecommendationResponse res = engine.recommendShows(680L, req);
+        assertNotNull(res);
+        assertEquals(1, res.getCandidates().size());
+        assertEquals(3002L, res.getCandidates().get(0).getShowId(), "Show B (₹600 total) must be returned");
+        assertEquals(1, res.getExcludedBudget(), "Show A (₹1000 total) must be excluded by budget");
+
+        // Per-person budget = ₹100 -> Party budget = ₹400 -> Both excluded
+        ShowRecommendationRequest reqLow = new ShowRecommendationRequest();
+        reqLow.setCityId(1L);
+        reqLow.setPartySize(4);
+        reqLow.setBudgetPerPerson(new BigDecimal("100.00"));
+
+        ShowRecommendationResponse resLow = engine.recommendShows(680L, reqLow);
+        assertEquals(0, resLow.getCandidates().size());
+        assertEquals(2, resLow.getExcludedBudget());
+        assertTrue(resLow.getConflictAnalysis().contains("budget"));
+    }
+
+    @Test
+    @DisplayName("Combined AND semantics: Formats + Times + Budget together")
+    void testCombinedAndSemantics() {
+        ShowRecommendationRequest req = new ShowRecommendationRequest();
+        req.setCityId(1L);
+        req.setPartySize(4);
+        req.setPreferredFormats(List.of("IMAX"));
+        req.setPreferredTimes(List.of("EVENING"));
+        req.setBudgetPerPerson(new BigDecimal("300.00")); // party budget ₹1200
+
+        ShowRecommendationResponse res = engine.recommendShows(680L, req);
+        assertNotNull(res);
+        assertEquals(1, res.getCandidates().size());
+        assertEquals(3001L, res.getCandidates().get(0).getShowId());
+        assertEquals(1, res.getExcludedTime(), "Show B excluded by time (Afternoon vs Evening)");
     }
 }

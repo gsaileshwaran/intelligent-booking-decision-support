@@ -233,27 +233,43 @@ export const decisionApi = {
   },
   getShowRecommendations: async (movieId: number, params?: {
     cityId?: number;
+    theatreId?: number;
     languageCode?: string;
+    languages?: string[];
     dateFrom?: string;   // ISO date e.g. "2026-09-20"
     dateTo?: string;     // ISO date e.g. "2026-09-27"
     formatPreference?: string;
+    formats?: string[];
     timePreference?: string;
+    times?: string[];
     priority?: 'BEST_PRICE' | 'BEST_SEATS' | 'BEST_TIME' | 'BALANCED';
     partySize?: number;
+    budgetPerPerson?: number;
     budgetMax?: number;
     budgetMaxTotal?: number; // total budget for whole party
   }): Promise<ShowRecommendationResponse> => {
     const query = new URLSearchParams();
-    if (params?.cityId !== undefined) query.set('cityId', params.cityId.toString());
+    if (params?.cityId !== undefined && params?.cityId !== null) query.set('cityId', params.cityId.toString());
+    if (params?.theatreId !== undefined && params?.theatreId !== null) query.set('theatreId', params.theatreId.toString());
     if (params?.languageCode) query.set('languageCode', params.languageCode);
+    if (params?.languages && params.languages.length > 0) {
+      params.languages.forEach(l => query.append('languages', l));
+    }
     if (params?.dateFrom) query.set('dateFrom', params.dateFrom);
     if (params?.dateTo) query.set('dateTo', params.dateTo);
     if (params?.formatPreference) query.set('formatPreference', params.formatPreference);
+    if (params?.formats && params.formats.length > 0) {
+      params.formats.forEach(f => query.append('formats', f));
+    }
     if (params?.timePreference) query.set('timePreference', params.timePreference);
+    if (params?.times && params.times.length > 0) {
+      params.times.forEach(t => query.append('times', t));
+    }
     if (params?.priority) query.set('priority', params.priority);
-    if (params?.partySize !== undefined) query.set('partySize', params.partySize.toString());
-    if (params?.budgetMaxTotal !== undefined) query.set('budgetMaxTotal', params.budgetMaxTotal.toString());
-    if (params?.budgetMax !== undefined) query.set('budgetMax', params.budgetMax.toString());
+    if (params?.partySize !== undefined && params?.partySize !== null) query.set('partySize', params.partySize.toString());
+    if (params?.budgetPerPerson !== undefined && params?.budgetPerPerson !== null) query.set('budgetPerPerson', params.budgetPerPerson.toString());
+    if (params?.budgetMaxTotal !== undefined && params?.budgetMaxTotal !== null) query.set('budgetMaxTotal', params.budgetMaxTotal.toString());
+    if (params?.budgetMax !== undefined && params?.budgetMax !== null) query.set('budgetMax', params.budgetMax.toString());
     const qs = query.toString() ? `?${query.toString()}` : '';
     return request<ShowRecommendationResponse>(`/api/v1/decision/movies/${movieId}/recommend-shows${qs}`);
   },

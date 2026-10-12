@@ -40,6 +40,7 @@ public class SeatHoldService {
     private final SeatTypeRepository seatTypeRepository;
     private final SeatPricingService seatPricingService;
     private final BusinessDateProvider businessDateProvider;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     public SeatHoldService(SeatHoldRepository seatHoldRepository,
                            ShowSeatRepository showSeatRepository,
@@ -48,6 +49,19 @@ public class SeatHoldService {
                            SeatTypeRepository seatTypeRepository,
                            SeatPricingService seatPricingService,
                            BusinessDateProvider businessDateProvider) {
+        this(seatHoldRepository, showSeatRepository, showRepository, seatRepository,
+                seatTypeRepository, seatPricingService, businessDateProvider, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SeatHoldService(SeatHoldRepository seatHoldRepository,
+                           ShowSeatRepository showSeatRepository,
+                           ShowRepository showRepository,
+                           SeatRepository seatRepository,
+                           SeatTypeRepository seatTypeRepository,
+                           SeatPricingService seatPricingService,
+                           BusinessDateProvider businessDateProvider,
+                           org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
         this.seatHoldRepository = seatHoldRepository;
         this.showSeatRepository = showSeatRepository;
         this.showRepository = showRepository;
@@ -55,6 +69,7 @@ public class SeatHoldService {
         this.seatTypeRepository = seatTypeRepository;
         this.seatPricingService = seatPricingService;
         this.businessDateProvider = businessDateProvider;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
@@ -71,12 +86,10 @@ public class SeatHoldService {
         Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ResourceNotFoundException("Show not found with ID: " + showId));
 
-        // Part A / Business Date Validation: Past date booking must fail server-side
+        // Business Date Validation: Enforce rolling 7-day customer booking window
         LocalDate showDate = show.getShowDate();
-        if (businessDateProvider.isPast(showDate)) {
-            throw new BadRequestException("SHOW_DATE_IN_PAST",
-                    String.format("SHOW_DATE_IN_PAST: Show date %s is before authoritative business date %s and cannot be booked.",
-                            showDate, businessDateProvider.getBusinessDate()));
+        if (businessDateProvider != null) {
+            businessDateProvider.validateBookingWindow(showDate);
         }
 
         // Prevent duplicate seat IDs in the selection
@@ -145,6 +158,12 @@ public class SeatHoldService {
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<SeatHold> holdsToSave = new ArrayList<>();
 
+        // Check active holds repository check
+        List<SeatHold> existingActive = seatHoldRepository.findActiveHoldsForShowAndSeats(showId, seatIds, Instant.now());
+        if (!existingActive.isEmpty()) {
+            throw new ConflictException("One or more selected seats are already actively held by another customer.");
+        }
+
         for (Long seatId : seatIds) {
             ShowSeat ss = seatMap.get(seatId);
             ss.setAvailabilityStatus("HELD");
@@ -157,6 +176,23 @@ public class SeatHoldService {
         }
 
         seatHoldRepository.saveAll(holdsToSave);
+
+        // Database-level exclusivity enforcement via active_seat_hold table
+        try {
+            if (jdbcTemplate != null) {
+                for (SeatHold h : holdsToSave) {
+                    jdbcTemplate.update(
+                        "INSERT INTO active_seat_hold (show_id, seat_id, hold_id, hold_token, expires_at) VALUES (?, ?, ?, ?, ?)",
+                        h.getShowId(), h.getSeatId(), h.getHoldId(), h.getHoldToken(), java.sql.Timestamp.from(expiresAt)
+                    );
+                }
+            }
+        } catch (org.springframework.dao.DuplicateKeyException dke) {
+            throw new ConflictException("One or more selected seats are already actively held by another customer.");
+        } catch (Exception ignored) {
+            // Table active_seat_hold might not exist prior to V13 migration
+        }
+
         log.info("Successfully held {} seats for user {} on show {} with token {}", seatIds.size(), userId, showId, holdToken);
 
         return new SeatHoldResponse(holdToken, showId, seatIds, expiresAt, HOLD_DURATION_SECONDS, totalAmount);
@@ -185,6 +221,11 @@ public class SeatHoldService {
             });
         }
         seatHoldRepository.saveAll(activeHolds);
+        try {
+            if (jdbcTemplate != null) {
+                jdbcTemplate.update("DELETE FROM active_seat_hold WHERE hold_token = ?", holdToken);
+            }
+        } catch (Exception ignored) {}
         log.info("Released hold with token {} for user {}", holdToken, userId);
     }
 
@@ -211,6 +252,11 @@ public class SeatHoldService {
         }
         if (!expired.isEmpty()) {
             seatHoldRepository.saveAll(expired);
+            try {
+                if (jdbcTemplate != null) {
+                    jdbcTemplate.update("DELETE FROM active_seat_hold WHERE show_id = ? AND expires_at < NOW()", showId);
+                }
+            } catch (Exception ignored) {}
             log.info("Cleaned up {} expired holds for show {}", expired.size(), showId);
         }
     }
@@ -235,6 +281,11 @@ public class SeatHoldService {
             });
         }
         seatHoldRepository.saveAll(expiredHolds);
+        try {
+            if (jdbcTemplate != null) {
+                jdbcTemplate.update("DELETE FROM active_seat_hold WHERE expires_at < NOW()");
+            }
+        } catch (Exception ignored) {}
         log.debug("Swept and released {} globally expired seat holds", expiredHolds.size());
     }
 

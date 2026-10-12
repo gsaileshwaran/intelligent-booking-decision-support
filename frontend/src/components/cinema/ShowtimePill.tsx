@@ -12,7 +12,7 @@ export const ShowtimePill: React.FC<ShowtimePillProps> = ({ show, onSelect }) =>
 
   const isCancelled = show.showStatus === 'CANCELLED';
   const availableCount = show.availableSeats;
-  const isSoldOut = availableCount !== undefined && availableCount <= 0;
+  const isSoldOut = (show.totalSeats ?? 1) > 0 && availableCount !== undefined && availableCount <= 0;
   const isLowAvailability = availableCount !== undefined && availableCount > 0 && availableCount <= 20;
 
   return (

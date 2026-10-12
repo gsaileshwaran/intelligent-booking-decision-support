@@ -25,7 +25,7 @@ public class ManagerAvailabilityController {
     @GetMapping
     @PreAuthorize("@theatreScopeService.hasAccessToShow(#showId)")
     public ResponseEntity<ApiResponse<ShowSeatAvailabilityResponse>> getSeats(@PathVariable Long showId) {
-        return ResponseEntity.ok(ApiResponse.ok(seatAvailabilityService.getShowSeatAvailability(showId)));
+        return ResponseEntity.ok(ApiResponse.ok(seatAvailabilityService.getShowSeatAvailability(showId, true)));
     }
 
     @PatchMapping

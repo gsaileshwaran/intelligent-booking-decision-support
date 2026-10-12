@@ -1,7 +1,9 @@
 package com.pvk.cinemas.booking.repository;
 
 import com.pvk.cinemas.booking.model.SeatHold;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,6 +19,10 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     List<SeatHold> findByHoldToken(String holdToken);
 
     List<SeatHold> findByHoldTokenAndStatus(String holdToken, String status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT sh FROM SeatHold sh WHERE sh.holdToken = :holdToken")
+    List<SeatHold> findByHoldTokenForUpdate(@Param("holdToken") String holdToken);
 
     List<SeatHold> findByShowIdAndStatus(Long showId, String status);
 

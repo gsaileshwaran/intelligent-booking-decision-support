@@ -84,6 +84,11 @@ public class MovieLifecycleService {
             refDate = (businessDateProvider != null) ? businessDateProvider.getBusinessDate() : LocalDate.now();
         }
 
+        // Multi-year future horizon mapping: map forward demo years to catalogue reference window
+        if (endDate != null && refDate.isAfter(endDate) && refDate.getYear() > endDate.getYear()) {
+            refDate = refDate.minusYears(refDate.getYear() - endDate.getYear());
+        }
+
         long durationDays = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         if (durationDays < 1) {
             durationDays = 1;
@@ -120,7 +125,13 @@ public class MovieLifecycleService {
         if (startDate == null || endDate == null) return 0.0;
         long durationDays = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         if (durationDays < 1) durationDays = 1;
-        long elapsedDays = ChronoUnit.DAYS.between(startDate, refDate != null ? refDate : LocalDate.now());
+
+        LocalDate effRef = (refDate != null) ? refDate : ((businessDateProvider != null) ? businessDateProvider.getBusinessDate() : LocalDate.now());
+        if (endDate != null && effRef.isAfter(endDate) && effRef.getYear() > endDate.getYear()) {
+            effRef = effRef.minusYears(effRef.getYear() - endDate.getYear());
+        }
+
+        long elapsedDays = ChronoUnit.DAYS.between(startDate, effRef);
         if (elapsedDays < 0) return 0.0;
         if (elapsedDays >= durationDays) return 1.0;
         return (double) elapsedDays / (double) durationDays;

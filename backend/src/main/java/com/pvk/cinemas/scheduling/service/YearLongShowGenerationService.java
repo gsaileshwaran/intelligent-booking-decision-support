@@ -127,24 +127,75 @@ public class YearLongShowGenerationService {
     ) {}
 
     /**
-     * Executes deterministic generation for the complete 365-day year-long horizon [B - 260, B + 104].
+     * Executes deterministic generation for the complete consecutive year of future demo schedules
+     * beginning on the current business date and extending approximately one year forward [B, B + 365].
      */
     @Transactional
     public GenerationSummary generateFullYearSchedule() {
         LocalDate anchorDate = businessDateProvider.getBusinessDate();
-        LocalDate startDate = businessDateProvider.getCalendarHorizonStart();
+        LocalDate startDate = businessDateProvider.getBusinessDate();
         LocalDate endDate = businessDateProvider.getCalendarHorizonEnd();
         return generateScheduleRange(startDate, endDate, anchorDate);
     }
 
     /**
-     * Generates shows for a single exhibition date d.
+     * Generates shows for a single exhibition date d safely without modifying existing shows.
      */
     @Transactional
     public GenerationSummary generateScheduleForDate(LocalDate date) {
         businessDateProvider.validateCalendarRange(date);
         LocalDate anchorDate = businessDateProvider.getBusinessDate();
         return generateScheduleRange(date, date, anchorDate);
+    }
+
+    /**
+     * Idempotently extends the schedule horizon to the target end date.
+     * Identifies the current maximum exhibition date in the database and only generates
+     * shows for forward unpopulated dates, preserving all existing schedules and IDs.
+     */
+    @Transactional
+    public GenerationSummary extendScheduleHorizon(LocalDate targetEndDate) {
+        businessDateProvider.validateCalendarRange(targetEndDate);
+        LocalDate anchorDate = businessDateProvider.getBusinessDate();
+        LocalDate maxDate = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(show_date), ?) FROM `SHOW`",
+                (rs, rowNum) -> rs.getDate(1).toLocalDate(),
+                Date.valueOf(anchorDate)
+        );
+        LocalDate startDate = maxDate.isBefore(anchorDate) ? anchorDate : maxDate.plusDays(1);
+        if (startDate.isAfter(targetEndDate)) {
+            log.info("Schedule horizon is already extended up to {} (requested: {}). Zero shows generated.", maxDate, targetEndDate);
+            return new GenerationSummary(0, 0, 0, 0, maxDate, maxDate);
+        }
+        return generateScheduleRange(startDate, targetEndDate, anchorDate);
+    }
+
+    /**
+     * Explicit administrative repair for a date range.
+     * Strictly fails fast if any show in the target date range has active customer bookings.
+     */
+    @Transactional
+    public GenerationSummary repairScheduleRange(LocalDate startDate, LocalDate endDate, boolean force) {
+        if (!force) {
+            throw new IllegalArgumentException("Administrative repair requires force=true confirmation.");
+        }
+        Integer bookingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM booking WHERE show_id IN (SELECT show_id FROM `SHOW` WHERE show_date BETWEEN ? AND ?)",
+                Integer.class,
+                Date.valueOf(startDate), Date.valueOf(endDate)
+        );
+        if (bookingCount != null && bookingCount > 0) {
+            throw new IllegalStateException("Cannot repair date range containing " + bookingCount +
+                    " active customer booking(s). Booked shows and historical records must be preserved.");
+        }
+        log.warn("Executing explicit administrative repair for range [{} to {}] with zero bookings...", startDate, endDate);
+        jdbcTemplate.update("DELETE FROM SHOW_SEAT WHERE show_id IN (SELECT show_id FROM `SHOW` WHERE show_date BETWEEN ? AND ?)",
+                Date.valueOf(startDate), Date.valueOf(endDate));
+        jdbcTemplate.update("DELETE FROM `SHOW` WHERE show_date BETWEEN ? AND ?",
+                Date.valueOf(startDate), Date.valueOf(endDate));
+
+        LocalDate anchorDate = businessDateProvider.getBusinessDate();
+        return generateScheduleRange(startDate, endDate, anchorDate);
     }
 
     /**
@@ -210,9 +261,23 @@ public class YearLongShowGenerationService {
         LocalDate activeStart = businessDateProvider.getActiveBookingWindowStart();
         LocalDate activeEnd = businessDateProvider.getActiveBookingWindowEnd();
 
+        // Check which dates in target range already contain scheduled shows to ensure idempotent preservation
+        List<LocalDate> existingDates = jdbcTemplate.query(
+                "SELECT DISTINCT show_date FROM `SHOW` WHERE show_date BETWEEN ? AND ?",
+                (rs, rowNum) -> rs.getDate(1).toLocalDate(),
+                Date.valueOf(startDate), Date.valueOf(endDate)
+        );
+        Set<LocalDate> populatedDates = new HashSet<>(existingDates);
+
         LocalDate curDate = startDate;
         while (!curDate.isAfter(endDate)) {
             LocalDate d = curDate;
+            if (populatedDates.contains(d)) {
+                log.info("Schedule for date {} already exists. Preserving existing shows, show IDs, and dependent records without modification.", d);
+                curDate = curDate.plusDays(1);
+                continue;
+            }
+
             DayOfWeek dow = d.getDayOfWeek();
             String dayType = (dow == DayOfWeek.FRIDAY || dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY)
                     ? "WEEKEND" : "WEEKDAY";
@@ -234,12 +299,17 @@ public class YearLongShowGenerationService {
                     List<Theatre> cityTheatres = theatresByCity.getOrDefault(cityId, Collections.emptyList());
                     if (cityTheatres.isEmpty()) continue;
 
-                    // Movie-to-Theatre allocation breadth K
+                    // Movie-to-Theatre allocation breadth K with balanced theatre distribution
                     Map<Long, List<Theatre>> theatreAlloc = new HashMap<>();
                     for (EligibleMovie em : eligibleMovies) {
                         int k = calculateTheatreBreadth(em.movie().getDemandTier(), em.stage());
                         int breadth = Math.min(k, cityTheatres.size());
-                        theatreAlloc.put(em.movie().getMovieId(), cityTheatres.subList(0, breadth));
+                        int startIdx = (int) ((em.movie().getMovieId() + d.getDayOfMonth()) % cityTheatres.size());
+                        List<Theatre> allocTheatres = new ArrayList<>(breadth);
+                        for (int i = 0; i < breadth; i++) {
+                            allocTheatres.add(cityTheatres.get((startIdx + i) % cityTheatres.size()));
+                        }
+                        theatreAlloc.put(em.movie().getMovieId(), allocTheatres);
                     }
 
                     for (Theatre theatre : cityTheatres) {
@@ -257,7 +327,9 @@ public class YearLongShowGenerationService {
                                 ? d.plusDays(1).atTime(clTime).atZone(IST_ZONE)
                                 : d.atTime(clTime).atZone(IST_ZONE);
 
-                        for (Screen screen : screensByTheatre.getOrDefault(tid, Collections.emptyList())) {
+                        List<Screen> screenList = screensByTheatre.getOrDefault(tid, Collections.emptyList());
+                        for (int scrIdx = 0; scrIdx < screenList.size(); scrIdx++) {
+                            Screen screen = screenList.get(scrIdx);
                             long sid = screen.getScreenId();
                             List<ScreenCapability> screenCaps = capsByScreen.getOrDefault(sid, Collections.emptyList());
                             if (screenCaps.isEmpty()) continue;
@@ -286,7 +358,7 @@ public class YearLongShowGenerationService {
 
                             boolean isDedicated = Boolean.TRUE.equals(screen.getIsPremium())
                                     || competing.size() == 1
-                                    || ("BLOCKBUSTER".equalsIgnoreCase(competing.get(0).movie().getDemandTier())
+                                    || (scrIdx == 0 && "BLOCKBUSTER".equalsIgnoreCase(competing.get(0).movie().getDemandTier())
                                     && ("OPENING".equalsIgnoreCase(competing.get(0).stage()) || "PEAK".equalsIgnoreCase(competing.get(0).stage()))
                                     && "WEEKEND".equalsIgnoreCase(dayType));
 
@@ -296,8 +368,12 @@ public class YearLongShowGenerationService {
                                 int target = calculateTargetShows(m1.movie().getDemandTier(), m1.stage(), dayType);
                                 alloc.put(m1.movie().getMovieId(), new TargetAllocation(m1, target));
                             } else {
-                                EligibleMovie ma = competing.get(0);
-                                EligibleMovie mb = competing.get(1);
+                                int offset = (scrIdx * 2) % competing.size();
+                                EligibleMovie ma = competing.get(offset);
+                                EligibleMovie mb = competing.get((offset + 1) % competing.size());
+                                if (ma.movie().getMovieId().equals(mb.movie().getMovieId()) && competing.size() > 1) {
+                                    mb = competing.get((offset + 2) % competing.size());
+                                }
                                 int targetA = Math.min(3, calculateTargetShows(ma.movie().getDemandTier(), ma.stage(), dayType));
                                 int targetB = Math.min(2, calculateTargetShows(mb.movie().getDemandTier(), mb.stage(), dayType));
                                 if (targetA < 3) {
@@ -333,7 +409,8 @@ public class YearLongShowGenerationService {
 
                             // Dynamic Capacity Release to Movie C if auditorium remains available
                             if (competing.size() > alloc.size()) {
-                                EligibleMovie mc = competing.get(alloc.size());
+                                int offsetC = isDedicated ? 1 : ((scrIdx * 2) + 2) % competing.size();
+                                EligibleMovie mc = competing.get(offsetC);
                                 int runtimeC = (mc.movie().getRuntimeMinutes() != null) ? mc.movie().getRuntimeMinutes() : 135;
                                 Long mlIdC = resolveBestMovieLanguage(mc.movie().getMovieId(), cityId, movieLanguagesByMovie, langCodesById);
 
@@ -354,33 +431,31 @@ public class YearLongShowGenerationService {
             curDate = curDate.plusDays(1);
         }
 
-        // 3. Clear existing shows for target date range
-        log.info("Deleting existing shows for range [{} to {}]...", startDate, endDate);
-        jdbcTemplate.update("DELETE FROM SHOW_SEAT WHERE show_id IN (SELECT show_id FROM `SHOW` WHERE show_date BETWEEN ? AND ?)",
-                Date.valueOf(startDate), Date.valueOf(endDate));
-        jdbcTemplate.update("DELETE FROM `SHOW` WHERE show_date BETWEEN ? AND ?",
-                Date.valueOf(startDate), Date.valueOf(endDate));
+        // 3. Non-destructive preservation check & insertion
+        if (generatedShows.isEmpty()) {
+            log.info("All dates in range [{} to {}] already contain complete schedules. Zero shows modified or recreated.", startDate, endDate);
+        } else {
+            // 4. Bulk batch insert newly generated shows
+            log.info("Batch inserting {} newly generated shows for unpopulated dates...", generatedShows.size());
+            String insertShowSql = "INSERT INTO `SHOW` (movie_language_id, screen_id, show_date, screen_capability_id, start_at, end_at, status, created_at, updated_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
-        // 4. Bulk batch insert generated shows
-        log.info("Batch inserting {} generated shows...", generatedShows.size());
-        String insertShowSql = "INSERT INTO `SHOW` (movie_language_id, screen_id, show_date, screen_capability_id, start_at, end_at, status, created_at, updated_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
-
-        int batchSize = 2000;
-        for (int i = 0; i < generatedShows.size(); i += batchSize) {
-            List<ShowRecord> batch = generatedShows.subList(i, Math.min(i + batchSize, generatedShows.size()));
-            jdbcTemplate.batchUpdate(insertShowSql, batch, batch.size(), (PreparedStatement ps, ShowRecord r) -> {
-                ps.setLong(1, r.movieLanguageId());
-                ps.setLong(2, r.screenId());
-                ps.setDate(3, Date.valueOf(r.showDate()));
-                ps.setLong(4, r.screenCapabilityId());
-                ps.setTimestamp(5, Timestamp.from(r.startAt()));
-                ps.setTimestamp(6, Timestamp.from(r.endAt()));
-                ps.setString(7, r.status());
-            });
+            int batchSize = 2000;
+            for (int i = 0; i < generatedShows.size(); i += batchSize) {
+                List<ShowRecord> batch = generatedShows.subList(i, Math.min(i + batchSize, generatedShows.size()));
+                jdbcTemplate.batchUpdate(insertShowSql, batch, batch.size(), (PreparedStatement ps, ShowRecord r) -> {
+                    ps.setLong(1, r.movieLanguageId());
+                    ps.setLong(2, r.screenId());
+                    ps.setDate(3, Date.valueOf(r.showDate()));
+                    ps.setLong(4, r.screenCapabilityId());
+                    ps.setTimestamp(5, Timestamp.from(r.startAt()));
+                    ps.setTimestamp(6, Timestamp.from(r.endAt()));
+                    ps.setString(7, r.status());
+                });
+            }
         }
 
-        // 5. Active Window SHOW_SEAT Eager Materialization (§8.2)
+        // 5. Active Window SHOW_SEAT Eager Materialization (§8.2) - only for shows lacking inventory
         int activeWindowShowCount = 0;
         int activeWindowShowSeatCount = 0;
 
@@ -388,12 +463,13 @@ public class YearLongShowGenerationService {
         LocalDate effectiveActiveEnd = endDate.isBefore(activeEnd) ? endDate : activeEnd;
 
         if (!effectiveActiveStart.isAfter(effectiveActiveEnd)) {
-            log.info("Materializing eager SHOW_SEAT inventory for active window [{} to {}]...",
+            log.info("Materializing eager SHOW_SEAT inventory for active window shows lacking inventory [{} to {}]...",
                     effectiveActiveStart, effectiveActiveEnd);
 
-            // Fetch newly inserted active shows
+            // Fetch newly inserted active shows lacking show_seat inventory
             String activeShowsQuery = "SELECT s.show_id, s.screen_id, s.show_date, s.movie_language_id " +
-                    "FROM `SHOW` s WHERE s.show_date BETWEEN ? AND ? ORDER BY s.show_id ASC";
+                    "FROM `SHOW` s WHERE s.show_date BETWEEN ? AND ? " +
+                    "AND s.show_id NOT IN (SELECT DISTINCT show_id FROM SHOW_SEAT) ORDER BY s.show_id ASC";
 
             List<PersistedShowInfo> activeShows = jdbcTemplate.query(
                     activeShowsQuery,
@@ -428,7 +504,7 @@ public class YearLongShowGenerationService {
                         .ifPresent(th -> theatresByScreenId.put(scr.getScreenId(), th));
             }
 
-            String insertSeatSql = "INSERT INTO SHOW_SEAT (show_id, seat_id, availability_status) VALUES (?, ?, ?)";
+            String insertSeatSql = "INSERT IGNORE INTO SHOW_SEAT (show_id, seat_id, availability_status) VALUES (?, ?, ?)";
             List<ShowSeatRecord> seatBatch = new ArrayList<>(5000);
 
             for (PersistedShowInfo psi : activeShows) {

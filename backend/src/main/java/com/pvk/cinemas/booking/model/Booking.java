@@ -28,6 +28,9 @@ public class Booking {
     @Column(name = "booking_status", nullable = false, length = 20)
     private String bookingStatus = "CONFIRMED";
 
+    @Column(name = "hold_token", unique = true, length = 64)
+    private String holdToken;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -37,7 +40,12 @@ public class Booking {
     public Booking() {}
 
     public Booking(String bookingReference, Long userId, Long showId, BigDecimal totalAmount, String bookingStatus) {
+        this(bookingReference, null, userId, showId, totalAmount, bookingStatus);
+    }
+
+    public Booking(String bookingReference, String holdToken, Long userId, Long showId, BigDecimal totalAmount, String bookingStatus) {
         this.bookingReference = bookingReference;
+        this.holdToken = holdToken;
         this.userId = userId;
         this.showId = showId;
         this.totalAmount = totalAmount;
@@ -51,6 +59,9 @@ public class Booking {
 
     public String getBookingReference() { return bookingReference; }
     public void setBookingReference(String bookingReference) { this.bookingReference = bookingReference; }
+
+    public String getHoldToken() { return holdToken; }
+    public void setHoldToken(String holdToken) { this.holdToken = holdToken; }
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }

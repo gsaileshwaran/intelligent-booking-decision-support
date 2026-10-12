@@ -6,7 +6,7 @@ spring:
     name: pvk-cinemas-backend
 
   datasource:
-    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:pvk_cinemas_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:pvk_cinemas_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true
     username: ${DB_USER:root}
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -27,7 +27,7 @@ spring:
     locations: classpath:db/migration
 
 app:
-  business-date: ${BUSINESS_DATE:2026-09-18}
+  business-date: ${BUSINESS_DATE:auto}
   demo-window-days: ${DEMO_WINDOW_DAYS:7}
   jwt:
     secret: ${JWT_SECRET:pvk-cinemas-super-secure-hmac-sha256-secret-key-for-jwt-tokens-2026!}

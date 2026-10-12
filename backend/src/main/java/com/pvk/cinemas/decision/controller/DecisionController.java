@@ -108,13 +108,17 @@ public class DecisionController {
             @PathVariable Long movieId,
             @RequestParam(name = "cityId", required = false) Long cityId,
             @RequestParam(name = "languageCode", required = false) String languageCode,
+            @RequestParam(name = "languages", required = false) List<String> languages,
             @RequestParam(name = "dateFrom", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
             @RequestParam(name = "dateTo", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
             @RequestParam(name = "formatPreference", required = false) String formatPreference,
+            @RequestParam(name = "formats", required = false) List<String> formats,
             @RequestParam(name = "timePreference", required = false) String timePreference,
+            @RequestParam(name = "times", required = false) List<String> times,
             @RequestParam(name = "priority", required = false, defaultValue = "BALANCED") String priority,
             @RequestParam(name = "theatreId", required = false) Long theatreId,
             @RequestParam(name = "partySize", required = false, defaultValue = "2") Integer partySize,
+            @RequestParam(name = "budgetPerPerson", required = false) BigDecimal budgetPerPerson,
             @RequestParam(name = "budgetMax", required = false) BigDecimal budgetMax,
             @RequestParam(name = "budgetMaxTotal", required = false) BigDecimal budgetMaxTotal,
             @RequestBody(required = false) ShowRecommendationRequest request) {
@@ -124,13 +128,17 @@ public class DecisionController {
         // Merge query params into request object (query params take precedence over body defaults)
         if (cityId != null && req.getCityId() == null) req.setCityId(cityId);
         if (languageCode != null && req.getLanguageCode() == null) req.setLanguageCode(languageCode);
+        if (languages != null && !languages.isEmpty() && req.getPreferredLanguages() == null) req.setPreferredLanguages(languages);
         if (dateFrom != null && req.getDateFrom() == null) req.setDateFrom(dateFrom);
         if (dateTo != null && req.getDateTo() == null) req.setDateTo(dateTo);
         if (formatPreference != null && req.getFormatPreference() == null) req.setFormatPreference(formatPreference);
+        if (formats != null && !formats.isEmpty() && req.getPreferredFormats() == null) req.setPreferredFormats(formats);
         if (timePreference != null && req.getTimePreference() == null) req.setTimePreference(timePreference);
+        if (times != null && !times.isEmpty() && req.getPreferredTimes() == null) req.setPreferredTimes(times);
         if (priority != null) req.setPriority(priority);
         if (theatreId != null && req.getTheatreId() == null) req.setTheatreId(theatreId);
         if (partySize != null && partySize > 0) req.setPartySize(partySize);
+        if (budgetPerPerson != null && req.getBudgetPerPerson() == null) req.setBudgetPerPerson(budgetPerPerson);
         if (budgetMaxTotal != null && req.getBudgetMaxTotal() == null) req.setBudgetMaxTotal(budgetMaxTotal);
         if (budgetMax != null && req.getBudgetMax() == null) req.setBudgetMax(budgetMax);
 

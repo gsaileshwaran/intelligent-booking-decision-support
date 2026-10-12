@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Film, MapPin, User as UserIcon, Shield, Sliders, LogOut, Menu, X } from 'lucide-react';
+import { Search, Film, User as UserIcon, Shield, Sliders, LogOut, Menu, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { theatresApi } from '../../api/client';
-import type { City } from '../../types/theatre';
 
 interface HeaderProps {
   onNavigate: (view: string, param?: any) => void;
@@ -10,18 +8,11 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onNavigate, currentView }) => {
-  const { user, isAuthenticated, isManager, isAdmin, logout, selectedCityId, setSelectedCityId } = useAuth();
-  const [cities, setCities] = useState<City[]>([]);
+  const { user, isAuthenticated, isManager, isAdmin, logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    theatresApi.getCities()
-      .then((data) => setCities(data))
-      .catch((err) => console.error('Failed to load cities', err));
-  }, []);
 
   // Close mobile menu on outside click
   useEffect(() => {
@@ -133,32 +124,6 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentView }) => {
           />
         </form>
 
-        {/* Desktop: City Selector */}
-        <div className="header-city-desktop" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <MapPin size={16} color="var(--accent-crimson)" />
-          <select
-            value={selectedCityId || ''}
-            onChange={(e) => setSelectedCityId(e.target.value ? parseInt(e.target.value, 10) : null)}
-            aria-label="Select City"
-            className="select"
-            style={{
-              padding: '6px 12px',
-              width: 'auto',
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border-subtle)',
-              fontSize: '0.88rem',
-              color: 'var(--text-primary)',
-              borderRadius: 'var(--radius-md)',
-            }}
-          >
-            <option value="">All Cities</option>
-            {cities.map((city) => (
-              <option key={city.cityId} value={city.cityId}>
-                {city.cityName}
-              </option>
-            ))}
-          </select>
-        </div>
 
         {/* Desktop: Main Navigation Links */}
         <nav className="header-nav-desktop" style={{ display: 'flex', alignItems: 'center', gap: '16px' }} aria-label="Main Navigation">
@@ -362,21 +327,6 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentView }) => {
           />
         </form>
 
-        {/* Mobile City Selector */}
-        <div>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px', display: 'block' }}>Select City</label>
-          <select
-            value={selectedCityId || ''}
-            onChange={(e) => setSelectedCityId(e.target.value ? parseInt(e.target.value, 10) : null)}
-            className="select"
-            style={{ width: '100%' }}
-          >
-            <option value="">All Cities</option>
-            {cities.map((city) => (
-              <option key={city.cityId} value={city.cityId}>{city.cityName}</option>
-            ))}
-          </select>
-        </div>
 
         {/* Divider */}
         <div style={{ height: '1px', background: 'var(--border-subtle)' }} />
@@ -426,7 +376,6 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentView }) => {
       <style>{`
         @media (max-width: 768px) {
           .header-search-desktop,
-          .header-city-desktop,
           .header-nav-desktop {
             display: none !important;
           }

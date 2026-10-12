@@ -31,7 +31,11 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
         JOIN theatre t ON t.theatre_id = sc.theatre_id
         WHERE t.city_id = :cityId
           AND (:status IS NULL OR m.status = :status)
-          AND s.status = 'SCHEDULED'
+          AND (
+            (:status = 'ENDED' AND s.status = 'COMPLETED')
+            OR (:status IS NOT NULL AND :status != 'ENDED' AND s.status = 'SCHEDULED')
+            OR (:status IS NULL AND s.status IN ('SCHEDULED', 'COMPLETED'))
+          )
         ORDER BY m.movie_id ASC
         """, nativeQuery = true)
     List<Movie> findMoviesByCityAndStatus(@Param("cityId") Integer cityId, @Param("status") String status);

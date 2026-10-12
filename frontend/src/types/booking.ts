@@ -172,6 +172,24 @@ export interface ShowCandidate {
 /** Alias — canonical name used in MovieDetailsView */
 export type ShowCandidateItem = ShowCandidate;
 
+export interface ShowRecommendationRequestParams {
+  cityId?: number;
+  theatreId?: number;
+  languageCode?: string;
+  languages?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  formatPreference?: string;
+  formats?: string[];
+  timePreference?: string;
+  times?: string[];
+  priority?: 'BEST_PRICE' | 'BEST_SEATS' | 'BEST_TIME' | 'BALANCED';
+  partySize?: number;
+  budgetPerPerson?: number;
+  budgetMaxTotal?: number;
+  budgetMax?: number;
+}
+
 export interface ShowRecommendationResponse {
   movieId: number;
   movieTitle: string;
@@ -183,6 +201,15 @@ export interface ShowRecommendationResponse {
   /** Backward compat alias — same as candidates */
   rankedCandidates?: ShowCandidate[];
   conflictAnalysis?: string;
+  totalShowsEvaluated?: number;
+  eligibleCandidatesCount?: number;
+  excludedCity?: number;
+  excludedDate?: number;
+  excludedLanguage?: number;
+  excludedFormat?: number;
+  excludedTime?: number;
+  excludedSeats?: number;
+  excludedBudget?: number;
 }
 
 export interface InteractionFriction {

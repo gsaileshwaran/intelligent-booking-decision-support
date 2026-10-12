@@ -58,9 +58,7 @@ public class MovieService {
         List<Movie> movies;
         String cleanStatus = (status != null && !status.isBlank()) ? status.trim().toUpperCase() : null;
         if (cityId != null) {
-            movies = movieRepository.findMoviesByCityAndStatus(cityId, cleanStatus);
-        } else if (cleanStatus != null && ("UPCOMING".equals(cleanStatus) || "AIRING".equals(cleanStatus) || "ENDED".equals(cleanStatus))) {
-            movies = movieRepository.findByMovieStatus(cleanStatus);
+            movies = movieRepository.findMoviesByCityAndStatus(cityId, null);
         } else {
             movies = movieRepository.findAllByOrderByMovieIdAsc();
         }
@@ -78,12 +76,13 @@ public class MovieService {
         if (cleanStatus != null) {
             movies = movies.stream()
                     .filter(m -> {
-                        String effective = movieLifecycleService.determineEffectiveStatus(m);
-                        String stage = movieLifecycleService.calculateLifecycleStage(m);
+                        if (m.getExhibitionStartDate() != null && m.getExhibitionEndDate() != null) {
+                            String effective = movieLifecycleService.determineEffectiveStatus(m);
+                            String stage = movieLifecycleService.calculateLifecycleStage(m);
+                            return cleanStatus.equalsIgnoreCase(effective) || cleanStatus.equalsIgnoreCase(stage);
+                        }
                         String dbStatus = m.getMovieStatus() != null ? m.getMovieStatus().toUpperCase() : "";
-                        return cleanStatus.equalsIgnoreCase(effective)
-                                || cleanStatus.equalsIgnoreCase(stage)
-                                || cleanStatus.equalsIgnoreCase(dbStatus);
+                        return cleanStatus.equalsIgnoreCase(dbStatus);
                     })
                     .collect(Collectors.toList());
         }

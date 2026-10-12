@@ -57,19 +57,6 @@ public class InteractionFrictionDetector {
             );
         }
 
-        // 4. Filter Instability (Repeated filter tweaks)
-        if (request.getFilterChangeCount() >= 4) {
-            return new InteractionFrictionResponse(
-                    true,
-                    "FILTER_INSTABILITY",
-                    "MEDIUM",
-                    "Discovery Filter Instability",
-                    "The interaction pattern indicates frequent filter changes (" + request.getFilterChangeCount() + " modifications). Resetting to broad candidate view.",
-                    "RESET_OR_EXPAND_FILTERS",
-                    request.getFilterChangeCount()
-            );
-        }
-
         return new InteractionFrictionResponse();
     }
 }

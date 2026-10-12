@@ -30,12 +30,12 @@ class CalendarHorizonUnitTest {
 
         // B - 260 days = 2026-01-01
         assertEquals(LocalDate.of(2026, 1, 1), start);
-        // B + 104 days = 2026-12-31
-        assertEquals(LocalDate.of(2026, 12, 31), end);
+        // B + 365 days = 2027-09-18
+        assertEquals(LocalDate.of(2027, 9, 18), end);
     }
 
     @Test
-    @DisplayName("Boundary acceptance: B-260 and B+104 are within calendar range")
+    @DisplayName("Boundary acceptance: B-260 and B+365 are within calendar range")
     void testCalendarBoundariesAccepted() {
         LocalDate start = businessDateProvider.getCalendarHorizonStart();
         LocalDate end = businessDateProvider.getCalendarHorizonEnd();
@@ -49,10 +49,10 @@ class CalendarHorizonUnitTest {
     }
 
     @Test
-    @DisplayName("Boundary rejection: B-261 and B+105 throw OutOfCalendarRangeException")
+    @DisplayName("Boundary rejection: B-261 and B+366 throw OutOfCalendarRangeException")
     void testCalendarBoundariesRejected() {
         LocalDate beforeStart = businessDateProvider.getCalendarHorizonStart().minusDays(1); // 2025-12-31
-        LocalDate afterEnd = businessDateProvider.getCalendarHorizonEnd().plusDays(1); // 2027-01-01
+        LocalDate afterEnd = businessDateProvider.getCalendarHorizonEnd().plusDays(1); // 2027-09-19
 
         assertFalse(businessDateProvider.isWithinCalendarRange(beforeStart));
         assertFalse(businessDateProvider.isWithinCalendarRange(afterEnd));
@@ -80,7 +80,7 @@ class CalendarHorizonUnitTest {
         assertEquals(LocalDate.of(2026, 6, 1), customAnchor);
 
         LocalDate expectedStart = customAnchor.minusDays(260);
-        LocalDate expectedEnd = customAnchor.plusDays(104);
+        LocalDate expectedEnd = customAnchor.plusDays(365);
 
         assertEquals(expectedStart, customProvider.getCalendarHorizonStart());
         assertEquals(expectedEnd, customProvider.getCalendarHorizonEnd());

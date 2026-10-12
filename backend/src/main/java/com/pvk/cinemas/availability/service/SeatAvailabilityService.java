@@ -45,6 +45,8 @@ public class SeatAvailabilityService {
     private final com.pvk.cinemas.catalogue.repository.MovieLanguageRepository movieLanguageRepository;
     private final com.pvk.cinemas.catalogue.service.MovieLifecycleService movieLifecycleService;
     private final com.pvk.cinemas.scheduling.service.DeterministicInventoryEngine deterministicInventoryEngine;
+    private final com.pvk.cinemas.common.time.BusinessDateProvider businessDateProvider;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     public SeatAvailabilityService(ShowRepository showRepository,
                                    ShowSeatRepository showSeatRepository,
@@ -58,7 +60,30 @@ public class SeatAvailabilityService {
                                    com.pvk.cinemas.catalogue.repository.MovieRepository movieRepository,
                                    com.pvk.cinemas.catalogue.repository.MovieLanguageRepository movieLanguageRepository,
                                    com.pvk.cinemas.catalogue.service.MovieLifecycleService movieLifecycleService,
-                                   com.pvk.cinemas.scheduling.service.DeterministicInventoryEngine deterministicInventoryEngine) {
+                                   com.pvk.cinemas.scheduling.service.DeterministicInventoryEngine deterministicInventoryEngine,
+                                   com.pvk.cinemas.common.time.BusinessDateProvider businessDateProvider) {
+        this(showRepository, showSeatRepository, screenCapabilityRepository, screenRepository,
+                theatreRepository, seatRepository, seatTypeRepository, auditLogService,
+                seatPricingService, movieRepository, movieLanguageRepository, movieLifecycleService,
+                deterministicInventoryEngine, businessDateProvider, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SeatAvailabilityService(ShowRepository showRepository,
+                                   ShowSeatRepository showSeatRepository,
+                                   ScreenCapabilityRepository screenCapabilityRepository,
+                                   ScreenRepository screenRepository,
+                                   TheatreRepository theatreRepository,
+                                   SeatRepository seatRepository,
+                                   SeatTypeRepository seatTypeRepository,
+                                   AuditLogService auditLogService,
+                                   SeatPricingService seatPricingService,
+                                   com.pvk.cinemas.catalogue.repository.MovieRepository movieRepository,
+                                   com.pvk.cinemas.catalogue.repository.MovieLanguageRepository movieLanguageRepository,
+                                   com.pvk.cinemas.catalogue.service.MovieLifecycleService movieLifecycleService,
+                                   com.pvk.cinemas.scheduling.service.DeterministicInventoryEngine deterministicInventoryEngine,
+                                   com.pvk.cinemas.common.time.BusinessDateProvider businessDateProvider,
+                                   org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
         this.showRepository = showRepository;
         this.showSeatRepository = showSeatRepository;
         this.screenCapabilityRepository = screenCapabilityRepository;
@@ -72,6 +97,8 @@ public class SeatAvailabilityService {
         this.movieLanguageRepository = movieLanguageRepository;
         this.movieLifecycleService = movieLifecycleService;
         this.deterministicInventoryEngine = deterministicInventoryEngine;
+        this.businessDateProvider = businessDateProvider;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
@@ -80,8 +107,17 @@ public class SeatAvailabilityService {
      */
     @Transactional
     public ShowSeatAvailabilityResponse getShowSeatAvailability(Long showId) {
+        return getShowSeatAvailability(showId, false);
+    }
+
+    @Transactional
+    public ShowSeatAvailabilityResponse getShowSeatAvailability(Long showId, boolean skipWindowValidation) {
         Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+
+        if (!skipWindowValidation && businessDateProvider != null) {
+            businessDateProvider.validateBookingWindow(show.getShowDate());
+        }
 
         ScreenCapability sc = screenCapabilityRepository.findById(show.getScreenCapabilityId())
                 .orElseThrow(() -> new ResourceNotFoundException("Screen capability not found: " + show.getScreenCapabilityId()));
@@ -195,6 +231,7 @@ public class SeatAvailabilityService {
             return java.util.Collections.emptyList();
         }
 
+        List<ShowSeat> generated = null;
         if (deterministicInventoryEngine != null && movieLanguageRepository != null && movieRepository != null && movieLifecycleService != null) {
             var mlOpt = movieLanguageRepository.findById(show.getMovieLanguageId());
             if (mlOpt.isPresent()) {
@@ -206,7 +243,7 @@ public class SeatAvailabilityService {
                     String dayType = (dow == java.time.DayOfWeek.FRIDAY || dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY)
                             ? "WEEKEND" : "WEEKDAY";
                     double rho = movieLifecycleService.calculateRho(movie.getExhibitionStartDate(), movie.getExhibitionEndDate(), sDate);
-                    List<ShowSeat> generated = deterministicInventoryEngine.generateShowSeats(
+                    generated = deterministicInventoryEngine.generateShowSeats(
                             show.getShowId(),
                             sDate,
                             physicalSeats,
@@ -216,17 +253,42 @@ public class SeatAvailabilityService {
                             dayType,
                             theatre.getTheatreTier()
                     );
-                    return showSeatRepository.saveAll(generated);
                 }
             }
         }
 
-        List<ShowSeat> fallbackSeats = new ArrayList<>(physicalSeats.size());
-        for (Seat seat : physicalSeats) {
-            String status = ("BLOCKED".equalsIgnoreCase(seat.getStatus()) || "INACTIVE".equalsIgnoreCase(seat.getStatus()))
-                    ? "BLOCKED" : "AVAILABLE";
-            fallbackSeats.add(new ShowSeat(show.getShowId(), seat.getSeatId(), status));
+        if (generated == null) {
+            generated = new ArrayList<>(physicalSeats.size());
+            for (Seat seat : physicalSeats) {
+                String status = ("BLOCKED".equalsIgnoreCase(seat.getStatus()) || "INACTIVE".equalsIgnoreCase(seat.getStatus()))
+                        ? "BLOCKED" : "AVAILABLE";
+                generated.add(new ShowSeat(show.getShowId(), seat.getSeatId(), status));
+            }
         }
-        return showSeatRepository.saveAll(fallbackSeats);
+
+        // Concurrency-safe insert using INSERT IGNORE to prevent race conditions on simultaneous first-time access
+        if (jdbcTemplate != null) {
+            String insertSql = "INSERT IGNORE INTO show_seat (show_id, seat_id, availability_status) VALUES (?, ?, ?)";
+            final List<ShowSeat> batch = generated;
+            jdbcTemplate.batchUpdate(insertSql, batch, batch.size(), (ps, ss) -> {
+                ps.setLong(1, ss.getId().getShowId());
+                ps.setLong(2, ss.getId().getSeatId());
+                ps.setString(3, ss.getAvailabilityStatus());
+            });
+            List<ShowSeat> persisted = showSeatRepository.findByIdShowId(show.getShowId());
+            if (!persisted.isEmpty()) {
+                return persisted;
+            }
+        }
+
+        try {
+            return showSeatRepository.saveAll(generated);
+        } catch (Exception ex) {
+            List<ShowSeat> existing = showSeatRepository.findByIdShowId(show.getShowId());
+            if (!existing.isEmpty()) {
+                return existing;
+            }
+            throw ex;
+        }
     }
 }

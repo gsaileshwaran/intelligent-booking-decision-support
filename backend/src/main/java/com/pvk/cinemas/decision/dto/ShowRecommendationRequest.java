@@ -2,6 +2,7 @@ package com.pvk.cinemas.decision.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.*;
 
 /**
  * Request DTO for show recommendation with hard constraints and priority modes.
@@ -30,15 +31,21 @@ public class ShowRecommendationRequest {
     private Long theatreId;
 
     // Hard constraints
-    private String languageCode;       // e.g. "en", "ta", "hi" — null means no language constraint
-    private LocalDate dateFrom;        // inclusive — null means no lower bound
-    private LocalDate dateTo;          // inclusive — null means no upper bound
+    private String languageCode;                 // legacy single language code
+    private List<String> preferredLanguages;    // multi-select languages (codes or names)
+    private LocalDate dateFrom;                  // inclusive
+    private LocalDate dateTo;                    // inclusive
     private int partySize = 2;
-    private BigDecimal budgetMaxTotal; // total budget for all partySize seats
+    private BigDecimal budgetPerPerson;          // per-person max budget
+    private BigDecimal budgetMaxTotal;           // total party budget
 
-    // Soft preferences
-    private String formatPreference;   // e.g. "IMAX", "4DX", "2D"
-    private String timePreference;     // e.g. "EVENING", "AFTERNOON", "MORNING", "NIGHT", or "18:30"
+    // Format constraints (multi-select)
+    private String formatPreference;             // legacy single format
+    private List<String> preferredFormats;      // multi-select formats & capabilities (2D, 3D, IMAX, 4DX, DOLBY_ATMOS)
+
+    // Time constraints (multi-select)
+    private String timePreference;               // legacy single time
+    private List<String> preferredTimes;        // multi-select time slots (MORNING, AFTERNOON, EVENING, NIGHT)
 
     // Priority mode — drives weight distribution
     private String priority = "BALANCED"; // BEST_PRICE | BEST_SEATS | BEST_TIME | BALANCED
@@ -50,7 +57,7 @@ public class ShowRecommendationRequest {
     private Double weightPrice;
 
     // Legacy field for backward compat
-    private BigDecimal budgetMax; // per-ticket budget (deprecated; use budgetMaxTotal)
+    private BigDecimal budgetMax; // per-ticket budget (deprecated; use budgetPerPerson or budgetMaxTotal)
 
     public ShowRecommendationRequest() {}
 
@@ -61,7 +68,68 @@ public class ShowRecommendationRequest {
         this.partySize = partySize;
     }
 
-    // ---- Getters / Setters ----
+    // ---- Multi-Select Resolution Helpers ----
+
+    public List<String> getEffectiveFormats() {
+        if (preferredFormats != null && !preferredFormats.isEmpty()) {
+            return preferredFormats.stream()
+                    .filter(f -> f != null && !f.trim().isEmpty() && !"ALL".equalsIgnoreCase(f.trim()))
+                    .map(String::trim)
+                    .toList();
+        }
+        if (formatPreference != null && !formatPreference.trim().isEmpty() && !"ALL".equalsIgnoreCase(formatPreference.trim())) {
+            return List.of(formatPreference.trim());
+        }
+        return Collections.emptyList();
+    }
+
+    public List<String> getEffectiveLanguages() {
+        if (preferredLanguages != null && !preferredLanguages.isEmpty()) {
+            return preferredLanguages.stream()
+                    .filter(l -> l != null && !l.trim().isEmpty() && !"ALL".equalsIgnoreCase(l.trim()))
+                    .map(String::trim)
+                    .toList();
+        }
+        if (languageCode != null && !languageCode.trim().isEmpty() && !"ALL".equalsIgnoreCase(languageCode.trim())) {
+            return List.of(languageCode.trim());
+        }
+        return Collections.emptyList();
+    }
+
+    public List<String> getEffectiveTimes() {
+        if (preferredTimes != null && !preferredTimes.isEmpty()) {
+            return preferredTimes.stream()
+                    .filter(t -> t != null && !t.trim().isEmpty() && !"ALL".equalsIgnoreCase(t.trim()))
+                    .map(t -> t.trim().toUpperCase(Locale.ENGLISH))
+                    .toList();
+        }
+        return Collections.emptyList();
+    }
+
+    public BigDecimal getEffectivePartyBudget(int effectivePartySize) {
+        if (budgetPerPerson != null && budgetPerPerson.compareTo(BigDecimal.ZERO) > 0) {
+            return budgetPerPerson.multiply(BigDecimal.valueOf(effectivePartySize));
+        }
+        if (budgetMaxTotal != null && budgetMaxTotal.compareTo(BigDecimal.ZERO) > 0) {
+            return budgetMaxTotal;
+        }
+        if (budgetMax != null && budgetMax.compareTo(BigDecimal.ZERO) > 0) {
+            return budgetMax.multiply(BigDecimal.valueOf(effectivePartySize));
+        }
+        return null;
+    }
+
+    public BigDecimal getBudgetPerPerson() { return budgetPerPerson; }
+    public void setBudgetPerPerson(BigDecimal budgetPerPerson) { this.budgetPerPerson = budgetPerPerson; }
+
+    public List<String> getPreferredFormats() { return preferredFormats; }
+    public void setPreferredFormats(List<String> preferredFormats) { this.preferredFormats = preferredFormats; }
+
+    public List<String> getPreferredLanguages() { return preferredLanguages; }
+    public void setPreferredLanguages(List<String> preferredLanguages) { this.preferredLanguages = preferredLanguages; }
+
+    public List<String> getPreferredTimes() { return preferredTimes; }
+    public void setPreferredTimes(List<String> preferredTimes) { this.preferredTimes = preferredTimes; }
 
     public Long getCityId() { return cityId; }
     public void setCityId(Long cityId) { this.cityId = cityId; }
